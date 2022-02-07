@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(learning-media-foundation VERSION 0.0.0 LANGUAGES CXX)
+project(learning-media-foundation VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_SUPPRESS_REGENERATION true)
 set(CMAKE_VS_WINRT_BY_DEFAULT true)

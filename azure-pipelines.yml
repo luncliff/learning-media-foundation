@@ -58,6 +58,7 @@ jobs:
           cmakeArgs: "--preset=vcpkg-x64-windows-debug"
           workingDirectory: $(Build.SourcesDirectory)
       - task: VSBuild@1
+        displayName: "Build: VSBuild"
         inputs:
           solution: build-x64-windows/learning-media-foundation.sln
           platform: "$(build.platform)" # x64|Win32
@@ -65,11 +66,11 @@ jobs:
           clean: true
           msbuildArchitecture: "x64"
           logFileVerbosity: detailed
-      # - task: CMake@1
-      #   displayName: "CMake: Build"
-      #   inputs:
-      #     cmakeArgs: "--build --preset=vcpkg-x64-windows-debug"
-      #     workingDirectory: $(Build.SourcesDirectory)
+      - task: CMake@1
+        displayName: "Build: CMake Preset"
+        inputs:
+          cmakeArgs: "--build --preset=vcpkg-x64-windows-debug"
+          workingDirectory: $(Build.SourcesDirectory)
 
   - job: Analysis
     dependsOn: Build
@@ -81,9 +82,47 @@ jobs:
           key: '2019-02 | vcpkg | x64'
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
-        displayName: "Install packages with VcPkg"
+        displayName: "Install: Vcpkg"
         inputs:
           vcpkgGitCommitId: $(vcpkg.commit)
           vcpkgArguments: "catch2 ms-gsl spdlog directxtex directxtk directxmath directx-headers glfw3 egl-registry opengl-registry"
         env:
           VCPKG_DEFAULT_TRIPLET: x64-windows
+      - task: SonarCloudPrepare@1
+        inputs:
+          SonarCloud: "luncliff-sonarcloud"
+          organization: "luncliff-github"
+          scannerMode: "MSBuild"
+          projectKey: "luncliff-media"
+          projectName: "luncliff-media"
+          projectVersion: "0.1.3"
+          extraProperties: |
+            sonar.language=c++
+            sonar.cpp.std=c++17
+            sonar.sourceEncoding=UTF-8
+            sonar.sources=src/,test/
+            sonar.exclusions=scripts/
+            sonar.verbose=true
+            sonar.cfamily.threads=4
+            sonar.cfamily.build-wrapper-output=bw-output
+      # https://github.com/SonarSource/sonarcloud_example_cpp-cmake-windows-otherci
+      - powershell: |
+          Invoke-WebRequest -Uri http://sonarcloud.io/static/cpp/build-wrapper-win-x86_64.zip -OutFile build-wrapper-win.zip
+          Expand-Archive -Path build-wrapper-win.zip -DestinationPath .
+          Move-Item ./build-wrapper-win-x86/build-wrapper-win-x86-64.exe .
+      - task: CMake@1
+        displayName: "CMake: Configure/Generate"
+        inputs:
+          cmakeArgs: "--preset=vcpkg-x64-windows-debug"
+          workingDirectory: $(Build.SourcesDirectory)
+      # https://docs.sonarqube.org/latest/analysis/languages/cfamily/
+      # https://docs.sonarqube.org/latest/analysis/scan/sonarscanner-for-azure-devops/
+      # https://docs.sonarqube.org/latest/analysis/scan/sonarscanner-for-msbuild/
+      - powershell: |
+          ./build-wrapper-win-x86-64.exe --out-dir "../bw-output" `
+            MSBuild.exe build-x64-windows/learning-media-foundation.sln `
+            /t:rebuild /p:platform="x64" /p:configuration="Debug"
+      - task: SonarCloudAnalyze@1
+      - task: SonarCloudPublish@1
+        inputs:
+          pollingTimeoutSec: "300"
