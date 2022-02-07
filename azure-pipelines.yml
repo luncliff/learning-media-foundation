@@ -1,0 +1,65 @@
+
+trigger:
+  branches:
+    exclude:
+      - docs
+      - gh-pages
+
+schedules:
+  - cron: "10 4 * * 6"
+    displayName: "Weekly"
+    branches:
+      include:
+        - main
+
+variables:
+  - name: vcpkg.commit
+    value: "5ddd7f02689b7c5aab78711d77f61db5d2e5e79c" # mainstream 2021-12-01
+    # $(Build.BinariesDirectory)
+  - name: vcpkg.default.binary.cache
+    value: $(Build.BinariesDirectory)/vcpkg-caches
+
+jobs:
+  - job: Build
+    pool:
+      vmImage: "windows-latest"
+    strategy:
+      matrix:
+        release_x64:
+          BuildPlatform: x64
+          BuildConfiguration: Release
+          vcpkg.target.triplet: x64-windows
+        debug_x64:
+          BuildPlatform: x64
+          BuildConfiguration: Debug
+          vcpkg.target.triplet: x64-windows
+        debug_x86:
+          BuildPlatform: x86
+          BuildConfiguration: Debug
+          vcpkg.target.triplet: x86-windows
+    steps:
+      - task: PowerShell@2
+        inputs:
+          targetType: "inline"
+          script: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
+      - task: Cache@2
+        inputs:
+          key: '2022-02 | vcpkg'
+          path: $(vcpkg.default.binary.cache)
+      - task: run-vcpkg@0
+        displayName: "Install packages with VcPkg"
+        inputs:
+          vcpkgGitCommitId: $(vcpkg.commit)
+          vcpkgArguments: "catch2 ms-gsl spdlog directxtex directxtk directxmath directx-headers glfw3 egl-registry opengl-registry"
+        env:
+          VCPKG_DEFAULT_TRIPLET: $(vcpkg.target.triplet)
+
+  - job: Analysis
+    dependsOn: Build
+    pool:
+      vmImage: "windows-latest"
+    steps:
+      - task: Cache@2
+        inputs:
+          key: '2022-02 | vcpkg'
+          path: $(vcpkg.default.binary.cache)
