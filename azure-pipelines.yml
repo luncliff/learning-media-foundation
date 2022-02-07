@@ -21,7 +21,7 @@ variables:
 jobs:
   - job: Build
     pool:
-      vmImage: "windows-2022"
+      vmImage: "windows-2019"
     strategy:
       matrix:
         release_x64:
@@ -43,7 +43,7 @@ jobs:
           script: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
       - task: Cache@2
         inputs:
-          key: '2022-02 | vcpkg | $(build.platform)'
+          key: '2019-02 | vcpkg | $(build.platform)'
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
@@ -74,11 +74,11 @@ jobs:
   - job: Analysis
     dependsOn: Build
     pool:
-      vmImage: "windows-2022"
+      vmImage: "windows-2019"
     steps:
       - task: Cache@2
         inputs:
-          key: '2022-02 | vcpkg | x64'
+          key: '2019-02 | vcpkg | x64'
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
         displayName: "Install packages with VcPkg"
