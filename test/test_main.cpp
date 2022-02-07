@@ -29,7 +29,7 @@ fs::path get_asset_dir() noexcept {
     return fs::current_path();
 }
 
-bool has_env(gsl::czstring key) noexcept {
+bool has_env(const char* key) noexcept {
     size_t len = 0;
     char buf[40]{};
     if (auto ec = getenv_s(&len, buf, key); ec != 0)
@@ -38,7 +38,7 @@ bool has_env(gsl::czstring key) noexcept {
     return value.empty() == false;
 }
 
-auto make_logger(gsl::czstring name, FILE* fout) noexcept(false) {
+auto make_logger(const char* name, FILE* fout) noexcept(false) {
     using mutex_t = spdlog::details::console_nullmutex;
     using sink_t = spdlog::sinks::stdout_sink_base<mutex_t>;
     return std::make_unique<spdlog::logger>(name, std::make_shared<sink_t>(fout));
@@ -133,7 +133,6 @@ TEST_CASE_METHOD(winrt_test_case, "DispatcherQueue::TryEnqueue", "[WinRT]") {
         IAsyncAction operation = controller.ShutdownQueueAsync();
         operation.get();
     });
-
     DispatcherQueue queue = controller.DispatcherQueue();
     REQUIRE(queue);
     DWORD current = GetCurrentThreadId();
