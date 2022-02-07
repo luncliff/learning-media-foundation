@@ -15,27 +15,26 @@ schedules:
 variables:
   - name: vcpkg.commit
     value: "5ddd7f02689b7c5aab78711d77f61db5d2e5e79c" # mainstream 2021-12-01
-    # $(Build.BinariesDirectory)
   - name: vcpkg.default.binary.cache
     value: $(Build.BinariesDirectory)/vcpkg-caches
 
 jobs:
   - job: Build
     pool:
-      vmImage: "windows-latest"
+      vmImage: "windows-2022"
     strategy:
       matrix:
         release_x64:
-          BuildPlatform: x64
-          BuildConfiguration: Release
+          build.platform: x64
+          build.configuration: Release
           vcpkg.target.triplet: x64-windows
         debug_x64:
-          BuildPlatform: x64
-          BuildConfiguration: Debug
+          build.platform: x64
+          build.configuration: Debug
           vcpkg.target.triplet: x64-windows
         debug_x86:
-          BuildPlatform: x86
-          BuildConfiguration: Debug
+          build.platform: Win32
+          build.configuration: Debug
           vcpkg.target.triplet: x86-windows
     steps:
       - task: PowerShell@2
@@ -44,7 +43,42 @@ jobs:
           script: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
       - task: Cache@2
         inputs:
-          key: '2022-02 | vcpkg'
+          key: '2022-02 | vcpkg | $(build.platform)'
+          path: $(vcpkg.default.binary.cache)
+      - task: run-vcpkg@0
+        displayName: "Install: Vcpkg"
+        inputs:
+          vcpkgGitCommitId: $(vcpkg.commit)
+          vcpkgArguments: "ms-gsl spdlog directxtex directxtk directxmath directx-headers catch2 glfw3 egl-registry opengl-registry"
+        env:
+          VCPKG_DEFAULT_TRIPLET: $(vcpkg.target.triplet)
+      - task: CMake@1
+        displayName: "CMake: Configure/Generate"
+        inputs:
+          cmakeArgs: "--preset=vcpkg-x64-windows-debug"
+          workingDirectory: $(Build.SourcesDirectory)
+      - task: VSBuild@1
+        inputs:
+          solution: build-x64-windows/learning-media-foundation.sln
+          platform: "$(build.platform)" # x64|Win32
+          configuration: "$(build.configuration)" # Debug|Release
+          clean: true
+          msbuildArchitecture: "x64"
+          logFileVerbosity: detailed
+      # - task: CMake@1
+      #   displayName: "CMake: Build"
+      #   inputs:
+      #     cmakeArgs: "--build --preset=vcpkg-x64-windows-debug"
+      #     workingDirectory: $(Build.SourcesDirectory)
+
+  - job: Analysis
+    dependsOn: Build
+    pool:
+      vmImage: "windows-2022"
+    steps:
+      - task: Cache@2
+        inputs:
+          key: '2022-02 | vcpkg | x64'
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
         displayName: "Install packages with VcPkg"
@@ -52,14 +86,4 @@ jobs:
           vcpkgGitCommitId: $(vcpkg.commit)
           vcpkgArguments: "catch2 ms-gsl spdlog directxtex directxtk directxmath directx-headers glfw3 egl-registry opengl-registry"
         env:
-          VCPKG_DEFAULT_TRIPLET: $(vcpkg.target.triplet)
-
-  - job: Analysis
-    dependsOn: Build
-    pool:
-      vmImage: "windows-latest"
-    steps:
-      - task: Cache@2
-        inputs:
-          key: '2022-02 | vcpkg'
-          path: $(vcpkg.default.binary.cache)
+          VCPKG_DEFAULT_TRIPLET: x64-windows
