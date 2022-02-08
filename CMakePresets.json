@@ -15,6 +15,25 @@
                 "BUILD_TESTING": "ON",
                 "BUILD_SHARED_LIBS": "ON",
                 "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_VS_PLATFORM_NAME_DEFAULT": "x64",
+                "CMAKE_TOOLCHAIN_FILE": {
+                    "type": "FILEPATH",
+                    "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+                },
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+            }
+        },
+        {
+            "name": "vcpkg-x64-windows-release",
+            "displayName": "vcpkg(x64-windows) release",
+            "generator": "Visual Studio 16 2019",
+            "binaryDir": "${sourceDir}/build-x64-windows",
+            "cacheVariables": {
+                "BUILD_TESTING": "ON",
+                "BUILD_SHARED_LIBS": "ON",
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_VS_PLATFORM_NAME_DEFAULT": "x64",
                 "CMAKE_TOOLCHAIN_FILE": {
                     "type": "FILEPATH",
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
@@ -27,23 +46,24 @@
             }
         },
         {
-            "name": "vcpkg-x64-windows-release",
-            "displayName": "vcpkg(x64-windows) release",
+            "name": "vcpkg-x86-windows-debug",
+            "displayName": "vcpkg(x86-windows) debug",
             "generator": "Visual Studio 16 2019",
-            "binaryDir": "${sourceDir}/build-x64-windows",
+            "binaryDir": "${sourceDir}/build-x86-windows",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
                 "BUILD_SHARED_LIBS": "ON",
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_VS_PLATFORM_NAME_DEFAULT": "Win32",
                 "CMAKE_TOOLCHAIN_FILE": {
                     "type": "FILEPATH",
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
-                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "VCPKG_TARGET_TRIPLET": "x86-windows",
                 "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
             },
-            "environment": {
-                "EXPERIMENTAL": "true"
+            "debug": {
+                "output": true
             }
         }
     ],
@@ -57,6 +77,11 @@
             "name": "vcpkg-x64-windows-release",
             "configuration": "release",
             "configurePreset": "vcpkg-x64-windows-release"
+        },
+        {
+            "name": "vcpkg-x86-windows-debug",
+            "configuration": "debug",
+            "configurePreset": "vcpkg-x86-windows-debug"
         }
     ],
     "testPresets": [

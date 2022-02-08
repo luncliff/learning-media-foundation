@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.21)
 project(learning-media-foundation VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_SUPPRESS_REGENERATION true)
-set(CMAKE_VS_WINRT_BY_DEFAULT true)
 
 option(BUILD_SHARED_LIBS "https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html" ON)
 option(BUILD_TESTING "https://cmake.org/cmake/help/latest/module/CTest.html" ON)
@@ -33,7 +32,6 @@ message(STATUS "Using commit: ${GIT_COMMIT_ID}")
 string(TIMESTAMP BUILD_TIMESTAMP UTC) # %Y-%m-%dT%H:%M:%SZ
 message(STATUS "Using timestamp: ${BUILD_TIMESTAMP}")
 
-find_package(Microsoft.GSL CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(directx-headers CONFIG REQUIRED)
@@ -43,6 +41,7 @@ find_package(directxmath CONFIG REQUIRED)
 
 add_executable(media_test_suite
     test/test_main.cpp
+    test/test_dxva.cpp
 )
 
 target_compile_definitions(media_test_suite
@@ -57,7 +56,6 @@ PRIVATE
     shlwapi comctl32 # Windows COM
     dxva2 evr d3d11 dxguid dxgi # DXVA
     fmt::fmt-header-only spdlog::spdlog_header_only
-    Microsoft.GSL::GSL
     Microsoft::DirectX-Headers
     Microsoft::DirectXTex
     Microsoft::DirectXTK

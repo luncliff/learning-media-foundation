@@ -15,6 +15,8 @@ schedules:
 variables:
   - name: vcpkg.commit
     value: "5ddd7f02689b7c5aab78711d77f61db5d2e5e79c" # mainstream 2021-12-01
+  - name: vcpkg.feature.flags
+    value: "registries,binarycaching"
   - name: vcpkg.default.binary.cache
     value: $(Build.BinariesDirectory)/vcpkg-caches
 
@@ -55,12 +57,12 @@ jobs:
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
-          cmakeArgs: "--preset=vcpkg-x64-windows-debug"
+          cmakeArgs: "--preset=vcpkg-$(vcpkg.target.triplet)-debug"
           workingDirectory: $(Build.SourcesDirectory)
       - task: VSBuild@1
         displayName: "Build: VSBuild"
         inputs:
-          solution: build-x64-windows/learning-media-foundation.sln
+          solution: build-$(vcpkg.target.triplet)/learning-media-foundation.sln
           platform: "$(build.platform)" # x64|Win32
           configuration: "$(build.configuration)" # Debug|Release
           clean: true
@@ -69,7 +71,7 @@ jobs:
       - task: CMake@1
         displayName: "Build: CMake Preset"
         inputs:
-          cmakeArgs: "--build --preset=vcpkg-x64-windows-debug"
+          cmakeArgs: "--build --preset=vcpkg-$(vcpkg.target.triplet)-debug"
           workingDirectory: $(Build.SourcesDirectory)
 
   - job: Analysis
