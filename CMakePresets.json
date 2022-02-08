@@ -21,7 +21,8 @@
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
             }
         },
         {
@@ -39,7 +40,8 @@
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
             },
             "environment": {
                 "EXPERIMENTAL": "true"
@@ -60,7 +62,8 @@
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
                 "VCPKG_TARGET_TRIPLET": "x86-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
             },
             "debug": {
                 "output": true

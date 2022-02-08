@@ -6,6 +6,9 @@ set(CMAKE_SUPPRESS_REGENERATION true)
 option(BUILD_SHARED_LIBS "https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html" ON)
 option(BUILD_TESTING "https://cmake.org/cmake/help/latest/module/CTest.html" ON)
 
+set(CMAKE_INSTALL_DEBUG_LIBRARIES true)
+set(CMAKE_INSTALL_UCRT_LIBRARIES true)
+include(InstallRequiredSystemLibraries)
 include(GNUInstallDirs)
 include(CheckIncludeFileCXX)
 # see https://docs.microsoft.com/en-us/windows/win32/medfound/media-foundation-headers-and-libraries

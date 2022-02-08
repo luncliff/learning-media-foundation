@@ -58,7 +58,7 @@ jobs:
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
-          cmakeArgs: "--preset=vcpkg-$(vcpkg.target.triplet)-debug"
+          cmakeArgs: "--preset=vcpkg-$(vcpkg.target.triplet)-debug -DCMAKE_INSTALL_PREFIX:PATH=$(Build.BinariesDirectory)/install"
           workingDirectory: $(Build.SourcesDirectory)
       - task: VSBuild@1
         displayName: "Build: VSBuild"
@@ -74,6 +74,14 @@ jobs:
         inputs:
           cmakeArgs: "--build --preset=vcpkg-$(vcpkg.target.triplet)-debug"
           workingDirectory: $(Build.SourcesDirectory)
+      - task: CMake@1
+        inputs:
+          cmakeArgs: "--build --target install --preset=vcpkg-$(vcpkg.target.triplet)-debug"
+          workingDirectory: $(Build.SourcesDirectory)
+      - powershell: |
+          Push-Location install/bin
+            ./media_test_suite.exe --success
+          Pop-Location
 
   - job: Analysis
     dependsOn: Build
