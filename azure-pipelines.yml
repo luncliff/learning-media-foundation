@@ -39,10 +39,11 @@ jobs:
           build.configuration: Debug
           vcpkg.target.triplet: x86-windows
     steps:
+      - powershell: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
       - task: PowerShell@2
         inputs:
-          targetType: "inline"
-          script: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
+          targetType: "filepath"
+          filePath: "scripts/download_mp4.ps1"
       - task: Cache@2
         inputs:
           key: '2019-02 | vcpkg | $(build.platform)'

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.20)
 project(learning-media-foundation VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_SUPPRESS_REGENERATION true)
@@ -54,7 +54,7 @@ PRIVATE
     windowsapp # C++/WinRT
     mf mfplat mfplay mfreadwrite mfuuid wmcodecdspuuid # Media Foundation SDK
     shlwapi comctl32 # Windows COM
-    dxva2 evr d3d11 dxguid dxgi # DXVA
+    strmiids dxva2 evr d3d11 dxguid dxgi # DXVA
     fmt::fmt-header-only spdlog::spdlog_header_only
     Microsoft::DirectX-Headers
     Microsoft::DirectXTex
@@ -120,17 +120,6 @@ PRIVATE
 )
 
 get_filename_component(ASSET_DIR    ${PROJECT_SOURCE_DIR}/assets ABSOLUTE)
-
-function(download_asset FILENAME URL)
-    get_filename_component(TEST_ASSET_0 ${ASSET_DIR}/${FILENAME} ABSOLUTE)
-    if(NOT EXISTS ${TEST_ASSET_0})
-        file(DOWNLOAD "${URL}" ${TEST_ASSET_0})
-    endif()
-endfunction()
-download_asset(test-sample-0.mp4 "https://download.samplelib.com/mp4/sample-5s.mp4")
-download_asset(test-sample-1.mp4 "https://download.samplelib.com/mp4/sample-10s.mp4")
-download_asset(test-sample-2.mp4 "https://jsoncompare.org/LearningContainer/SampleFiles/Video/MP4/Sample-MP4-Video-File-Download.mp4")
-
 target_compile_definitions(media_test_suite
 PRIVATE
     ASSET_DIR="${ASSET_DIR}"
