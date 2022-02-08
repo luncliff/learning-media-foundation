@@ -125,6 +125,7 @@ struct dxva_test_case : public dx11_test_case {
     dxva_test_case() : dx11_test_case() {
         // Obtain a pointer to the IMFDXGIDeviceManager interface.
         REQUIRE(MFCreateDXGIDeviceManager(&dxgi_manager_token, dxgi_manager.put()) == S_OK);
+        // Obtain a pointer to the IMFDXGIDeviceManager interface.
         HRESULT hr = dxgi_manager->GetVideoService(dxgi_handle, //
                                                    IID_ID3D11VideoDevice, video_device.put_void());
         switch (hr) {
@@ -152,30 +153,48 @@ struct dxva_test_case : public dx11_test_case {
 };
 
 TEST_CASE_METHOD(dxva_test_case, "ID3D11VideoDevice", "[!mayfail]") {
+    SECTION("GetVideoDecoderProfile") {
+        UINT count = video_device->GetVideoDecoderProfileCount();
+        for (auto i = 0; i < count; ++i) {
+            GUID profile{};
+            auto hr = video_device->GetVideoDecoderProfile(i, &profile);
+            if (FAILED(hr))
+                FAIL(hr);
+        }
+    }
     SECTION("CreateVideoDecoder") {
         D3D11_VIDEO_DECODER_DESC desc{};
         D3D11_VIDEO_DECODER_CONFIG config{};
-        com_ptr<ID3D11VideoDecoder> decoder{};
-        REQUIRE(video_device->CreateVideoDecoder(&desc, &config, decoder.put()));
+        UINT count = 0;
+        REQUIRE(video_device->GetVideoDecoderConfigCount(&desc, &count) == 0);
+        for (auto i = 0; i < count; ++i) {
+            if (auto hr = video_device->GetVideoDecoderConfig(&desc, i, &config); FAILED(hr))
+                FAIL(hr);
+            com_ptr<ID3D11VideoDecoder> decoder{};
+            REQUIRE(video_device->CreateVideoDecoder(&desc, &config, decoder.put()) == S_OK);
+        }
     }
     SECTION("CreateVideoProcessor") {
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
+        desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        desc.InputWidth = 640;
+        desc.InputHeight = 480;
+        desc.OutputWidth = 256;
+        desc.OutputHeight = 256;
         com_ptr<ID3D11VideoProcessorEnumerator> enumerator{};
+        REQUIRE(video_device->CreateVideoProcessorEnumerator(&desc, enumerator.put()) == S_OK);
         REQUIRE(enumerator);
         D3D11_VIDEO_PROCESSOR_CAPS caps{};
         REQUIRE(enumerator->GetVideoProcessorCaps(&caps) == S_OK);
-        UINT conversion_index = 0;
+        const UINT index = caps.MaxInputStreams - 1;
         com_ptr<ID3D11VideoProcessor> processor{};
-        REQUIRE(video_device->CreateVideoProcessor(enumerator.get(), conversion_index, processor.put()));
+        REQUIRE(video_device->CreateVideoProcessor(enumerator.get(), index, processor.put()) == S_OK);
     }
 }
 
+/// @brief For a Media Foundation transform (MFT), this step occurs during the MFT_MESSAGE_SET_D3D_MANAGER event.
 /// @see https://github.com/mmaitre314/VideoEffect/tree/master/VideoEffects/VideoEffects/VideoEffects.Shared
 TEST_CASE_METHOD(dxva_test_case, "DirectX Surface Buffer(MF_SA_D3D11_SHARED_WITHOUT_MUTEX)") {
-    // Obtain a pointer to the IMFDXGIDeviceManager interface.
-    REQUIRE(MFCreateDXGIDeviceManager(&dxgi_manager_token, dxgi_manager.put()) == S_OK);
-    REQUIRE(dxgi_manager->ResetDevice(device.get(), dxgi_manager_token) == S_OK);
-    // For a Media Foundation transform (MFT), this step occurs during the MFT_MESSAGE_SET_D3D_MANAGER event.
-
     // Call MFCreateVideoSampleAllocatorEx to create the allocator object and get a pointer to the IMFVideoSampleAllocatorEx interface.
     com_ptr<IMFVideoSampleAllocatorEx> allocator{};
     REQUIRE(MFCreateVideoSampleAllocatorEx(IID_IMFVideoSampleAllocatorEx, reinterpret_cast<void**>(allocator.put())) ==
@@ -230,12 +249,8 @@ TEST_CASE_METHOD(dxva_test_case, "DirectX Surface Buffer(MF_SA_D3D11_SHARED_WITH
     REQUIRE((desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX));
 }
 
+// For a Media Foundation transform (MFT), this step occurs during the MFT_MESSAGE_SET_D3D_MANAGER event.
 TEST_CASE_METHOD(dxva_test_case, "DirectX Surface Buffer(MF_SA_D3D11_SHARED)") {
-    // Obtain a pointer to the IMFDXGIDeviceManager interface.
-    REQUIRE(MFCreateDXGIDeviceManager(&dxgi_manager_token, dxgi_manager.put()) == S_OK);
-    REQUIRE(dxgi_manager->ResetDevice(device.get(), dxgi_manager_token) == S_OK);
-    // For a Media Foundation transform (MFT), this step occurs during the MFT_MESSAGE_SET_D3D_MANAGER event.
-
     // Call MFCreateVideoSampleAllocatorEx to create the allocator object and get a pointer to the IMFVideoSampleAllocatorEx interface.
     com_ptr<IMFVideoSampleAllocatorEx> allocator{};
     REQUIRE(MFCreateVideoSampleAllocatorEx(IID_IMFVideoSampleAllocatorEx, reinterpret_cast<void**>(allocator.put())) ==
