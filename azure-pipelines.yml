@@ -34,10 +34,10 @@ jobs:
           build.platform: x64
           build.configuration: Debug
           vcpkg.target.triplet: x64-windows
-        debug_x86:
-          build.platform: Win32
-          build.configuration: Debug
-          vcpkg.target.triplet: x86-windows
+        # debug_x86:
+        #   build.platform: Win32
+        #   build.configuration: Debug
+        #   vcpkg.target.triplet: x86-windows
     steps:
       - powershell: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
       - task: PowerShell@2
@@ -79,9 +79,8 @@ jobs:
           cmakeArgs: "--build --target install --preset=vcpkg-$(vcpkg.target.triplet)-debug"
           workingDirectory: $(Build.SourcesDirectory)
       - powershell: |
-          Push-Location install/bin
-            ./media_test_suite.exe --success
-          Pop-Location
+          ./media_test_suite.exe --success
+        workingDirectory: $(Build.BinariesDirectory)/install/bin
 
   - job: Analysis
     dependsOn: Build
