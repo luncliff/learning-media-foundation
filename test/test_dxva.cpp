@@ -143,8 +143,7 @@ struct dxva_test_case : public dx11_test_case {
         if (hr = dxgi_manager->OpenDeviceHandle(&dxgi_handle); FAILED(hr))
             FAILED(hr);
         // retry with new dxgi_handle
-        if (hr = dxgi_manager->GetVideoService(dxgi_handle, IID_ID3D11VideoDevice, video_device.put_void()); FAILED(hr))
-            FAILED(hr);
+        REQUIRE(dxgi_manager->GetVideoService(dxgi_handle, IID_ID3D11VideoDevice, video_device.put_void()) == S_OK);
     }
     ~dxva_test_case() {
         if (dxgi_handle)
@@ -153,6 +152,7 @@ struct dxva_test_case : public dx11_test_case {
 };
 
 TEST_CASE_METHOD(dxva_test_case, "ID3D11VideoDevice", "[!mayfail]") {
+    REQUIRE(video_device);
     SECTION("GetVideoDecoderProfile") {
         UINT count = video_device->GetVideoDecoderProfileCount();
         for (auto i = 0; i < count; ++i) {

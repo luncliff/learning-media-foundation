@@ -9,6 +9,7 @@ Personal Practice project to learn [Microsoft Media Foundation SDK](https://docs
 Windows SDK 10.0.19041.0 or later
 
 * https://docs.microsoft.com/en-us/uwp/cpp-ref-for-winrt/winrt
+* https://github.com/microsoft/Windows-universal-samples
 
 ### Media Foundation SDK
 
