@@ -19,9 +19,16 @@
 //#pragma comment(lib, "strmiids") // for MR_VIDEO_RENDER_SERVICE
 // clang-format on
 
+#include <Inspectable.h>  // IInspectable
+#include <MemoryBuffer.h> // IMemoryBufferByteAccess
 #include <filesystem>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/base.h>
+#include <winrt/windows.foundation.h>
 
+#include <DirectXTK/DirectXHelpers.h>
+#include <DirectXTex.h>
 #include <spdlog/spdlog.h>
 
 namespace fs = std::filesystem;
@@ -142,8 +149,6 @@ struct dxva_test_case : public dx11_test_case {
             FAILED(hr);
         if (hr = dxgi_manager->OpenDeviceHandle(&dxgi_handle); FAILED(hr))
             FAILED(hr);
-        // retry with new dxgi_handle
-        REQUIRE(dxgi_manager->GetVideoService(dxgi_handle, IID_ID3D11VideoDevice, video_device.put_void()) == S_OK);
     }
     ~dxva_test_case() {
         if (dxgi_handle)
@@ -152,10 +157,19 @@ struct dxva_test_case : public dx11_test_case {
 };
 
 TEST_CASE_METHOD(dxva_test_case, "ID3D11VideoDevice", "[!mayfail]") {
+    // retry with new dxgi_handle
+    switch (HRESULT hr = dxgi_manager->GetVideoService(dxgi_handle, IID_ID3D11VideoDevice, video_device.put_void())) {
+    case S_OK:
+        break;
+    case E_NOINTERFACE:
+        spdlog::warn("{}: {}", "GetVideoService", "E_NOINTERFACE");
+    default:
+        FAIL(hr);
+    };
     REQUIRE(video_device);
     SECTION("GetVideoDecoderProfile") {
         UINT count = video_device->GetVideoDecoderProfileCount();
-        for (auto i = 0; i < count; ++i) {
+        for (UINT i = 0; i < count; ++i) {
             GUID profile{};
             auto hr = video_device->GetVideoDecoderProfile(i, &profile);
             if (FAILED(hr))
@@ -167,7 +181,7 @@ TEST_CASE_METHOD(dxva_test_case, "ID3D11VideoDevice", "[!mayfail]") {
         D3D11_VIDEO_DECODER_CONFIG config{};
         UINT count = 0;
         REQUIRE(video_device->GetVideoDecoderConfigCount(&desc, &count) == 0);
-        for (auto i = 0; i < count; ++i) {
+        for (UINT i = 0; i < count; ++i) {
             if (auto hr = video_device->GetVideoDecoderConfig(&desc, i, &config); FAILED(hr))
                 FAIL(hr);
             com_ptr<ID3D11VideoDecoder> decoder{};
@@ -392,4 +406,59 @@ TEST_CASE_METHOD(dxva_tex2d_test_case, "IMFSample from ID3D11Texture2D") {
 
     com_ptr<IMFMediaBuffer> buffer{};
     REQUIRE(sample->GetBufferByIndex(0, buffer.put()) == S_OK);
+}
+
+/// @see https://github.com/microsoft/Windows-universal-samples/blob/main/Samples/HolographicFaceTracking/cpp/Content/NV12VideoTexture.cpp
+TEST_CASE_METHOD(dxva_tex2d_test_case, "NV12VideoTexture") {
+    com_ptr<ID3D11Texture2D> texture{};
+    {
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Format = DXGI_FORMAT_NV12; // Common for Windows Webcam video sources
+        desc.Width = 640;
+        desc.Height = 480;
+        desc.ArraySize = 1;
+        desc.MipLevels = 1;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;  // read from texture in the shader
+        desc.Usage = D3D11_USAGE_DYNAMIC;             // copying from CPU memory
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; // write into the texture
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        REQUIRE(device->CreateTexture2D(&desc, nullptr, texture.put()) == S_OK);
+    }
+    SECTION("shader resoure view") {
+        com_ptr<ID3D11ShaderResourceView> luminance = nullptr;
+        {
+            CD3D11_SHADER_RESOURCE_VIEW_DESC desc{texture.get(), D3D11_SRV_DIMENSION_TEXTURE2D, DXGI_FORMAT_R8_UNORM};
+            REQUIRE(device->CreateShaderResourceView(texture.get(), &desc, luminance.put()) == S_OK);
+        }
+        com_ptr<ID3D11ShaderResourceView> chrominance = nullptr;
+        {
+            CD3D11_SHADER_RESOURCE_VIEW_DESC desc{texture.get(), D3D11_SRV_DIMENSION_TEXTURE2D, DXGI_FORMAT_R8G8_UNORM};
+            REQUIRE(device->CreateShaderResourceView(texture.get(), &desc, chrominance.put()) == S_OK);
+        }
+    }
+    SECTION("SoftwareBitmap") {
+        using namespace winrt::Windows::Graphics::Imaging;
+        using Windows::Foundation::IMemoryBufferByteAccess;
+        using winrt::Windows::Foundation::IMemoryBufferReference;
+
+        SoftwareBitmap bitmap{BitmapPixelFormat::Nv12, 640, 480, BitmapAlphaMode::Ignore};
+        BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Write);
+        IMemoryBufferReference ref = buffer.CreateReference();
+        com_ptr<IInspectable> unknown = ref.as<IInspectable>();
+        com_ptr<IMemoryBufferByteAccess> access = nullptr;
+        REQUIRE(unknown->QueryInterface(access.put()) == S_OK);
+
+        com_ptr<ID3D11Resource> resource{};
+        REQUIRE(texture->QueryInterface(resource.put()) == S_OK);
+        DirectX::MapGuard mapping{context.get(), resource.get(), 0, D3D11_MAP_WRITE_DISCARD, 0};
+
+        BYTE* src = nullptr;
+        UINT32 capacity = 0;
+        REQUIRE(access->GetBuffer(&src, &capacity) == S_OK);
+        REQUIRE(src);
+        REQUIRE(capacity == 640 * 480 * 3 / 2);
+        std::memcpy(mapping.pData, src, capacity);
+        //buffer.Close();
+    }
 }
