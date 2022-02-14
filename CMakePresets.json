@@ -7,7 +7,7 @@
     },
     "configurePresets": [
         {
-            "name": "vcpkg-x64-windows-debug",
+            "name": "x64-windows-debug",
             "displayName": "vcpkg(x64-windows) debug",
             "generator": "Visual Studio 16 2019",
             "binaryDir": "${sourceDir}/build-x64-windows",
@@ -26,7 +26,7 @@
             }
         },
         {
-            "name": "vcpkg-x64-windows-release",
+            "name": "x64-windows-release",
             "displayName": "vcpkg(x64-windows) release",
             "generator": "Visual Studio 16 2019",
             "binaryDir": "${sourceDir}/build-x64-windows",
@@ -48,7 +48,7 @@
             }
         },
         {
-            "name": "vcpkg-x86-windows-debug",
+            "name": "x86-windows-debug",
             "displayName": "vcpkg(x86-windows) debug",
             "generator": "Visual Studio 16 2019",
             "binaryDir": "${sourceDir}/build-x86-windows",
@@ -72,25 +72,25 @@
     ],
     "buildPresets": [
         {
-            "name": "vcpkg-x64-windows-debug",
-            "configuration": "debug",
-            "configurePreset": "vcpkg-x64-windows-debug"
+            "name": "x64-windows-debug",
+            "configuration": "Debug",
+            "configurePreset": "x64-windows-debug"
         },
         {
-            "name": "vcpkg-x64-windows-release",
-            "configuration": "release",
-            "configurePreset": "vcpkg-x64-windows-release"
+            "name": "x64-windows-release",
+            "configuration": "Release",
+            "configurePreset": "x64-windows-release"
         },
         {
-            "name": "vcpkg-x86-windows-debug",
-            "configuration": "debug",
-            "configurePreset": "vcpkg-x86-windows-debug"
+            "name": "x86-windows-debug",
+            "configuration": "Debug",
+            "configurePreset": "x86-windows-debug"
         }
     ],
     "testPresets": [
         {
-            "name": "vcpkg-x64-windows-debug",
-            "configurePreset": "vcpkg-x64-windows-debug",
+            "name": "x64-windows-debug",
+            "configurePreset": "x64-windows-debug",
             "output": {
                 "outputOnFailure": true
             },

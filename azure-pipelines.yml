@@ -58,7 +58,7 @@ jobs:
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
-          cmakeArgs: "--preset=vcpkg-$(vcpkg.target.triplet)-debug -DCMAKE_INSTALL_PREFIX:PATH=$(Build.BinariesDirectory)/install"
+          cmakeArgs: "--preset=$(vcpkg.target.triplet)-debug -DCMAKE_INSTALL_PREFIX:PATH=$(Build.BinariesDirectory)/install"
           workingDirectory: $(Build.SourcesDirectory)
       - task: VSBuild@1
         displayName: "Build: VSBuild"
@@ -72,11 +72,11 @@ jobs:
       - task: CMake@1
         displayName: "Build: CMake Preset"
         inputs:
-          cmakeArgs: "--build --preset=vcpkg-$(vcpkg.target.triplet)-debug"
+          cmakeArgs: "--build --preset=$(vcpkg.target.triplet)-debug"
           workingDirectory: $(Build.SourcesDirectory)
       - task: CMake@1
         inputs:
-          cmakeArgs: "--build --target install --preset=vcpkg-$(vcpkg.target.triplet)-debug"
+          cmakeArgs: "--build --target install --preset=$(vcpkg.target.triplet)-debug"
           workingDirectory: $(Build.SourcesDirectory)
       - powershell: |
           ./media_test_suite.exe --success
@@ -123,7 +123,7 @@ jobs:
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
-          cmakeArgs: "--preset=vcpkg-x64-windows-debug"
+          cmakeArgs: "--preset=x64-windows-debug"
           workingDirectory: $(Build.SourcesDirectory)
       # https://docs.sonarqube.org/latest/analysis/languages/cfamily/
       # https://docs.sonarqube.org/latest/analysis/scan/sonarscanner-for-azure-devops/
