@@ -23,7 +23,7 @@ variables:
 jobs:
   - job: Build
     pool:
-      vmImage: "windows-2019"
+      vmImage: "windows-2022"
     strategy:
       matrix:
         release_x64:
@@ -85,7 +85,7 @@ jobs:
   - job: Analysis
     dependsOn: Build
     pool:
-      vmImage: "windows-2019"
+      vmImage: "windows-2022"
     steps:
       - task: Cache@2
         inputs:
@@ -117,9 +117,9 @@ jobs:
             sonar.cfamily.build-wrapper-output=bw-output
       # https://github.com/SonarSource/sonarcloud_example_cpp-cmake-windows-otherci
       - powershell: |
-          Invoke-WebRequest -Uri http://sonarcloud.io/static/cpp/build-wrapper-win-x86_64.zip -OutFile build-wrapper-win.zip
-          Expand-Archive -Path build-wrapper-win.zip -DestinationPath .
-          Move-Item ./build-wrapper-win-x86/build-wrapper-win-x86-64.exe .
+          Invoke-WebRequest -Uri "https://sonarcloud.io/static/cpp/build-wrapper-win-x86.zip" -OutFile build-wrapper-win.zip
+          Expand-Archive -Path "build-wrapper-win.zip" -DestinationPath .
+          Move-Item -Path "./build-wrapper-win-x86/build-wrapper-win-x86-64.exe" -DestinationPath .
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
