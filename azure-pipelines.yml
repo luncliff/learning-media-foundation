@@ -85,7 +85,7 @@ jobs:
   - job: Analysis
     dependsOn: Build
     pool:
-      vmImage: "windows-2022"
+      vmImage: "windows-2022" # https://github.com/actions/virtual-environments/blob/main/images/win/Windows2022-Readme.md
     steps:
       - task: Cache@2
         inputs:
@@ -129,8 +129,10 @@ jobs:
       # https://docs.sonarqube.org/latest/analysis/scan/sonarscanner-for-azure-devops/
       # https://docs.sonarqube.org/latest/analysis/scan/sonarscanner-for-msbuild/
       - powershell: |
+          $env:Path="C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Msbuild\Current\Bin;$env:Path"
+          MSBuild --version
           ./build-wrapper-win-x86-64.exe --out-dir "../bw-output" `
-            MSBuild.exe build-x64-windows/learning-media-foundation.sln `
+            MSBuild build-x64-windows/learning-media-foundation.sln `
             /t:rebuild /p:platform="x64" /p:configuration="Debug"
       - task: SonarCloudAnalyze@1
       - task: SonarCloudPublish@1
