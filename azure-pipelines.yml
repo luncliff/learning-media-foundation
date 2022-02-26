@@ -114,6 +114,7 @@ jobs:
             sonar.verbose=true
             sonar.cfamily.threads=4
             sonar.cfamily.build-wrapper-output=bw-output
+            sonar.testExecutionReportPaths=build-x64-windows/sonar-test-report.xml
       # https://github.com/SonarSource/sonarcloud_example_cpp-cmake-windows-otherci
       - powershell: |
           Invoke-WebRequest -Uri "https://sonarcloud.io/static/cpp/build-wrapper-win-x86.zip" -OutFile build-wrapper-win.zip
@@ -131,11 +132,12 @@ jobs:
       - powershell: |
           $env:Path="C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Msbuild\Current\Bin;$env:Path"
           MSBuild --version
-          ./build-wrapper-win-x86-64.exe --out-dir "../bw-output" `
+          ./build-wrapper-win-x86-64.exe --out-dir "$(Build.SourcesDirectory)/../bw-output" `
             MSBuild build-x64-windows/learning-media-foundation.sln `
             /t:rebuild /p:platform="x64" /p:configuration="Debug"
-        displayName: "Sonar Build Wrapper"
-      - powershell: ./media_test_suite.exe
+        displayName: "Run Sonar Build Wrapper"
+      # https://docs.sonarqube.org/latest/analysis/generic-test/
+      - powershell: ./media_test_suite.exe --reporter=sonarqube --out "$(Build.SourcesDirectory)/build-x64-windows/sonar-test-report.xml"
         workingDirectory: build-x64-windows/Debug
         displayName: "Run Tests"
       # - task: PowerShell@2
