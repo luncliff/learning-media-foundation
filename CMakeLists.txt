@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(learning-media-foundation VERSION 0.1.2 LANGUAGES CXX)
+project(learning-media-foundation VERSION 0.1.3 LANGUAGES CXX)
 
 set(CMAKE_SUPPRESS_REGENERATION true)
 

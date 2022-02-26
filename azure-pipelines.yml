@@ -119,6 +119,7 @@ jobs:
           Invoke-WebRequest -Uri "https://sonarcloud.io/static/cpp/build-wrapper-win-x86.zip" -OutFile build-wrapper-win.zip
           Expand-Archive -Path "build-wrapper-win.zip" -DestinationPath .
           Move-Item -Path "./build-wrapper-win-x86/build-wrapper-win-x86-64.exe" -Destination .
+        displayName: "Download: Sonar Build Wrapper"
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
@@ -133,14 +134,17 @@ jobs:
           ./build-wrapper-win-x86-64.exe --out-dir "../bw-output" `
             MSBuild build-x64-windows/learning-media-foundation.sln `
             /t:rebuild /p:platform="x64" /p:configuration="Debug"
-      # - powershell: ./media_test_suite.exe
-      #   workingDirectory: build-x64-windows/Debug
-      #   displayName: "Run Tests"
+        displayName: "Sonar Build Wrapper"
+      - powershell: ./media_test_suite.exe
+        workingDirectory: build-x64-windows/Debug
+        displayName: "Run Tests"
       # - task: PowerShell@2
       #   displayName: "Create XML from coverage"
       #   inputs:
       #     filePath: "scripts/create-coverage-xml.ps1"
       - task: SonarCloudAnalyze@1
+        continueOnError: true
       - task: SonarCloudPublish@1
         inputs:
           pollingTimeoutSec: "300"
+        continueOnError: true
