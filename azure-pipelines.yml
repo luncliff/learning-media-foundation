@@ -14,7 +14,7 @@ schedules:
 
 variables:
   - name: vcpkg.commit
-    value: "5ddd7f02689b7c5aab78711d77f61db5d2e5e79c" # mainstream 2021-12-01
+    value: "b86c0c35b88e2bf3557ff49dc831689c2f085090" # mainstream 2022.02.23
   - name: vcpkg.feature.flags
     value: "registries,binarycaching"
   - name: vcpkg.default.binary.cache
@@ -46,7 +46,7 @@ jobs:
           filePath: "scripts/download_mp4.ps1"
       - task: Cache@2
         inputs:
-          key: '2019-02 | vcpkg | $(build.platform)'
+          key: '2022-02 | vcpkg | $(build.platform)'
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
@@ -89,7 +89,7 @@ jobs:
     steps:
       - task: Cache@2
         inputs:
-          key: '2019-02 | vcpkg | x64'
+          key: '2022-02 | vcpkg | x64'
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
@@ -119,7 +119,7 @@ jobs:
       - powershell: |
           Invoke-WebRequest -Uri "https://sonarcloud.io/static/cpp/build-wrapper-win-x86.zip" -OutFile build-wrapper-win.zip
           Expand-Archive -Path "build-wrapper-win.zip" -DestinationPath .
-          Move-Item -Path "./build-wrapper-win-x86/build-wrapper-win-x86-64.exe" -DestinationPath .
+          Move-Item -Path "./build-wrapper-win-x86/build-wrapper-win-x86-64.exe" -Destination .
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
