@@ -4,28 +4,28 @@
 #include <d3d11_4.h>
 #include <d3d9.h>
 #include <mfapi.h>
-#include <windows.h>
+#include <Windows.h>
 #include <windowsx.h>
 
-#include <Dxva2api.h>
+#include <dxva2api.h>
 #include <codecapi.h> // for [codec]
 #include <evr.h>
 #include <mediaobj.h> // for [dsp]
 #include <mfplay.h>
 #include <mmdeviceapi.h>
 #include <ppl.h>
-#include <shlwapi.h>
+#include <Shlwapi.h>
 #include <wmsdkidl.h>
 //#pragma comment(lib, "strmiids") // for MR_VIDEO_RENDER_SERVICE
 // clang-format on
 
-#include <Inspectable.h>  // IInspectable
 #include <MemoryBuffer.h> // IMemoryBufferByteAccess
 #include <filesystem>
+#include <inspectable.h> // IInspectable
+#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/base.h>
-#include <winrt/windows.foundation.h>
 
 #include <DirectXTK/DirectXHelpers.h>
 #include <DirectXTex.h>
