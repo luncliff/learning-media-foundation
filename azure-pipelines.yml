@@ -14,7 +14,7 @@ schedules:
 
 variables:
   - name: vcpkg.commit
-    value: "5ddd7f02689b7c5aab78711d77f61db5d2e5e79c" # mainstream 2021-12-01
+    value: "b86c0c35b88e2bf3557ff49dc831689c2f085090" # mainstream 2022.02.23
   - name: vcpkg.feature.flags
     value: "registries,binarycaching"
   - name: vcpkg.default.binary.cache
@@ -23,7 +23,7 @@ variables:
 jobs:
   - job: Build
     pool:
-      vmImage: "windows-2019"
+      vmImage: "windows-2022"
     strategy:
       matrix:
         release_x64:
@@ -42,11 +42,10 @@ jobs:
       - powershell: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
       - task: PowerShell@2
         inputs:
-          targetType: "filepath"
           filePath: "scripts/download_mp4.ps1"
       - task: Cache@2
         inputs:
-          key: '2019-02 | vcpkg | $(build.platform)'
+          key: '2022-02 | vcpkg | $(build.platform)'
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
@@ -85,12 +84,16 @@ jobs:
   - job: Analysis
     dependsOn: Build
     pool:
-      vmImage: "windows-2019"
+      vmImage: "windows-2022" # https://github.com/actions/virtual-environments/blob/main/images/win/Windows2022-Readme.md
     steps:
       - task: Cache@2
         inputs:
-          key: '2019-02 | vcpkg | x64'
+          key: '2022-02 | vcpkg | x64'
           path: $(vcpkg.default.binary.cache)
+      - task: Cache@2
+        inputs:
+          key: '2022-02 | sonarqube'
+          path: $(Pipeline.Workspace)/.sonarqube
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
         inputs:
@@ -108,18 +111,20 @@ jobs:
           projectVersion: "0.1.3"
           extraProperties: |
             sonar.language=c++
-            sonar.cpp.std=c++17
+            sonar.cpp.std=c++20
             sonar.sourceEncoding=UTF-8
             sonar.sources=src/,test/
             sonar.exclusions=scripts/
             sonar.verbose=true
             sonar.cfamily.threads=4
             sonar.cfamily.build-wrapper-output=bw-output
+            sonar.testExecutionReportPaths=build-x64-windows/sonar-test-report.xml
       # https://github.com/SonarSource/sonarcloud_example_cpp-cmake-windows-otherci
       - powershell: |
-          Invoke-WebRequest -Uri http://sonarcloud.io/static/cpp/build-wrapper-win-x86_64.zip -OutFile build-wrapper-win.zip
-          Expand-Archive -Path build-wrapper-win.zip -DestinationPath .
-          Move-Item ./build-wrapper-win-x86/build-wrapper-win-x86-64.exe .
+          Invoke-WebRequest -Uri "https://sonarcloud.io/static/cpp/build-wrapper-win-x86.zip" -OutFile build-wrapper-win.zip
+          Expand-Archive -Path "build-wrapper-win.zip" -DestinationPath .
+          Move-Item -Path "./build-wrapper-win-x86/build-wrapper-win-x86-64.exe" -Destination .
+        displayName: "Download: Sonar Build Wrapper"
       - task: CMake@1
         displayName: "CMake: Configure/Generate"
         inputs:
@@ -129,10 +134,23 @@ jobs:
       # https://docs.sonarqube.org/latest/analysis/scan/sonarscanner-for-azure-devops/
       # https://docs.sonarqube.org/latest/analysis/scan/sonarscanner-for-msbuild/
       - powershell: |
-          ./build-wrapper-win-x86-64.exe --out-dir "../bw-output" `
-            MSBuild.exe build-x64-windows/learning-media-foundation.sln `
+          $env:Path="C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Msbuild\Current\Bin;$env:Path"
+          MSBuild --version
+          ./build-wrapper-win-x86-64.exe --out-dir "$(Build.SourcesDirectory)/../bw-output" `
+            MSBuild build-x64-windows/learning-media-foundation.sln `
             /t:rebuild /p:platform="x64" /p:configuration="Debug"
+        displayName: "Run Sonar Build Wrapper"
+      # https://docs.sonarqube.org/latest/analysis/generic-test/
+      - powershell: ./media_test_suite.exe --reporter=sonarqube --out "$(Build.SourcesDirectory)/build-x64-windows/sonar-test-report.xml"
+        workingDirectory: build-x64-windows/Debug
+        displayName: "Run Tests"
+      # - task: PowerShell@2
+      #   displayName: "Create XML from coverage"
+      #   inputs:
+      #     filePath: "scripts/create-coverage-xml.ps1"
       - task: SonarCloudAnalyze@1
+        continueOnError: true
       - task: SonarCloudPublish@1
         inputs:
           pollingTimeoutSec: "300"
+        continueOnError: true

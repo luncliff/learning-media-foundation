@@ -56,8 +56,9 @@ class test_suite_context_t final {
     }
 
     void use_environment(wchar_t* envp[]) {
-        if (envp)
-            spdlog::debug("envs:");
+        if (envp == nullptr)
+            return;
+        spdlog::debug("envs:");
         for (wchar_t** ptr = envp; (*ptr) != nullptr; ++ptr)
             spdlog::debug(" - {}", winrt::to_string(std::wstring_view{*ptr}));
     }

@@ -1,15 +1,15 @@
 {
-    "version": 2,
+    "version": 3,
     "cmakeMinimumRequired": {
         "major": 3,
-        "minor": 20,
+        "minor": 21,
         "patch": 0
     },
     "configurePresets": [
         {
             "name": "x64-windows-debug",
             "displayName": "vcpkg(x64-windows) debug",
-            "generator": "Visual Studio 16 2019",
+            "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build-x64-windows",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
@@ -28,7 +28,7 @@
         {
             "name": "x64-windows-release",
             "displayName": "vcpkg(x64-windows) release",
-            "generator": "Visual Studio 16 2019",
+            "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build-x64-windows",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
@@ -50,7 +50,7 @@
         {
             "name": "x86-windows-debug",
             "displayName": "vcpkg(x86-windows) debug",
-            "generator": "Visual Studio 16 2019",
+            "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build-x86-windows",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
