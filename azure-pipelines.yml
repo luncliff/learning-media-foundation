@@ -90,6 +90,10 @@ jobs:
         inputs:
           key: '2022-02 | vcpkg | x64'
           path: $(vcpkg.default.binary.cache)
+      - task: Cache@2
+        inputs:
+          key: '2022-02 | sonarqube'
+          path: $(Pipeline.Workspace)/.sonarqube
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
         inputs:
