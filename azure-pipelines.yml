@@ -42,7 +42,6 @@ jobs:
       - powershell: New-Item -Type Directory -Force ${env:VCPKG_DEFAULT_BINARY_CACHE}
       - task: PowerShell@2
         inputs:
-          targetType: "filepath"
           filePath: "scripts/download_mp4.ps1"
       - task: Cache@2
         inputs:
@@ -108,7 +107,7 @@ jobs:
           projectVersion: "0.1.3"
           extraProperties: |
             sonar.language=c++
-            sonar.cpp.std=c++17
+            sonar.cpp.std=c++20
             sonar.sourceEncoding=UTF-8
             sonar.sources=src/,test/
             sonar.exclusions=scripts/
@@ -134,6 +133,13 @@ jobs:
           ./build-wrapper-win-x86-64.exe --out-dir "../bw-output" `
             MSBuild build-x64-windows/learning-media-foundation.sln `
             /t:rebuild /p:platform="x64" /p:configuration="Debug"
+      # - powershell: ./media_test_suite.exe
+      #   workingDirectory: build-x64-windows/Debug
+      #   displayName: "Run Tests"
+      # - task: PowerShell@2
+      #   displayName: "Create XML from coverage"
+      #   inputs:
+      #     filePath: "scripts/create-coverage-xml.ps1"
       - task: SonarCloudAnalyze@1
       - task: SonarCloudPublish@1
         inputs:
