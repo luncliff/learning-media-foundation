@@ -1,20 +1,18 @@
 #include <catch2/catch.hpp>
 
 // clang-format off
+#include <Windows.h>
 #include <d3d11_4.h>
 #include <d3d9.h>
 #include <mfapi.h>
-#include <Windows.h>
 #include <windowsx.h>
 
+#include <Shlwapi.h>
 #include <dxva2api.h>
-#include <codecapi.h> // for [codec]
 #include <evr.h>
-#include <mediaobj.h> // for [dsp]
 #include <mfplay.h>
 #include <mmdeviceapi.h>
 #include <ppl.h>
-#include <Shlwapi.h>
 #include <wmsdkidl.h>
 //#pragma comment(lib, "strmiids") // for MR_VIDEO_RENDER_SERVICE
 // clang-format on
@@ -32,9 +30,13 @@
 #include <spdlog/spdlog.h>
 
 namespace fs = std::filesystem;
+
 using winrt::com_ptr;
 
 fs::path get_asset_dir() noexcept;
+std::string to_mf_string(const GUID& guid) noexcept;
+std::string to_hex_string(HRESULT hr) noexcept;
+std::string to_guid_string(const GUID& guid) noexcept;
 
 HRESULT print_formats(ID3D11Device* device, DXGI_FORMAT format) {
     UINT flags = 0;
@@ -68,7 +70,7 @@ struct dx11_test_case {
                                         D3D11_CREATE_DEVICE_DEBUG | D3D11_CREATE_DEVICE_VIDEO_SUPPORT, levels, 3,
                                         D3D11_SDK_VERSION, device.put(), &device_feature_level, context.put());
             FAILED(hr)) {
-            spdlog::error("{}: {:#08x}", "D3D11CreateDevice", hr);
+            spdlog::error("{}: {:#08x}", "D3D11CreateDevice", static_cast<uint32_t>(hr));
             FAIL(hr);
         }
         if (auto hr = device->QueryInterface(threading.put()); SUCCEEDED(hr))
@@ -125,7 +127,7 @@ struct dxva_test_case : public dx11_test_case {
     com_ptr<IDXGIAdapter> adapter{};
     UINT dxgi_manager_token{};
     com_ptr<IMFDXGIDeviceManager> dxgi_manager{};
-    HANDLE dxgi_handle{};
+    HANDLE dxgi_handle = nullptr;
     com_ptr<ID3D11VideoDevice> video_device{};
 
   public:
@@ -156,6 +158,7 @@ struct dxva_test_case : public dx11_test_case {
     }
 };
 
+/// @see https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/DX11VideoRenderer
 TEST_CASE_METHOD(dxva_test_case, "ID3D11VideoDevice", "[!mayfail]") {
     // retry with new dxgi_handle
     switch (HRESULT hr = dxgi_manager->GetVideoService(dxgi_handle, IID_ID3D11VideoDevice, video_device.put_void())) {
@@ -171,21 +174,39 @@ TEST_CASE_METHOD(dxva_test_case, "ID3D11VideoDevice", "[!mayfail]") {
         UINT count = video_device->GetVideoDecoderProfileCount();
         for (UINT i = 0; i < count; ++i) {
             GUID profile{};
-            auto hr = video_device->GetVideoDecoderProfile(i, &profile);
-            if (FAILED(hr))
+            if (auto hr = video_device->GetVideoDecoderProfile(i, &profile); FAILED(hr))
                 FAIL(hr);
         }
     }
     SECTION("CreateVideoDecoder") {
         D3D11_VIDEO_DECODER_DESC desc{};
-        D3D11_VIDEO_DECODER_CONFIG config{};
-        UINT count = 0;
-        REQUIRE(video_device->GetVideoDecoderConfigCount(&desc, &count) == 0);
-        for (UINT i = 0; i < count; ++i) {
-            if (auto hr = video_device->GetVideoDecoderConfig(&desc, i, &config); FAILED(hr))
-                FAIL(hr);
-            com_ptr<ID3D11VideoDecoder> decoder{};
-            REQUIRE(video_device->CreateVideoDecoder(&desc, &config, decoder.put()) == S_OK);
+        desc.SampleWidth = 640;
+        desc.SampleHeight = 360;
+        desc.OutputFormat = DXGI_FORMAT::DXGI_FORMAT_NV12; // same as webcam input
+        spdlog::debug("decoder:");
+        spdlog::debug("  size: {}x{}", desc.SampleWidth, desc.SampleHeight);
+        spdlog::debug("  format: {}", desc.OutputFormat);
+
+        UINT num_profile = video_device->GetVideoDecoderProfileCount();
+        REQUIRE(num_profile);
+        spdlog::debug("  profiles:");
+
+        for (UINT p = 0; p < num_profile; ++p) {
+            REQUIRE(video_device->GetVideoDecoderProfile(p, &desc.Guid) == S_OK);
+            UINT count = 0;
+            REQUIRE(video_device->GetVideoDecoderConfigCount(&desc, &count) == S_OK);
+            if (count)
+                spdlog::debug("   - p{:#02}: {}", p, count);
+            for (UINT i = 0; i < count; ++i) {
+                D3D11_VIDEO_DECODER_CONFIG config{};
+                if (auto hr = video_device->GetVideoDecoderConfig(&desc, i, &config); FAILED(hr))
+                    FAIL(hr);
+                com_ptr<ID3D11VideoDecoder> decoder{};
+                if (auto hr = video_device->CreateVideoDecoder(&desc, &config, decoder.put()); FAILED(hr)) {
+                    spdlog::error("{}: {:#08x}", "CreateVideoDecoder", static_cast<uint32_t>(hr));
+                    continue;
+                }
+            }
         }
     }
     SECTION("CreateVideoProcessor") {
@@ -197,12 +218,16 @@ TEST_CASE_METHOD(dxva_test_case, "ID3D11VideoDevice", "[!mayfail]") {
         desc.OutputHeight = 256;
         com_ptr<ID3D11VideoProcessorEnumerator> enumerator{};
         REQUIRE(video_device->CreateVideoProcessorEnumerator(&desc, enumerator.put()) == S_OK);
-        REQUIRE(enumerator);
+
         D3D11_VIDEO_PROCESSOR_CAPS caps{};
         REQUIRE(enumerator->GetVideoProcessorCaps(&caps) == S_OK);
-        const UINT index = caps.MaxInputStreams - 1;
+
+        const UINT conversion = caps.RateConversionCapsCount - 1;
+        D3D11_VIDEO_PROCESSOR_RATE_CONVERSION_CAPS conversion_caps{};
+        REQUIRE(enumerator->GetVideoProcessorRateConversionCaps(conversion, &conversion_caps) == S_OK);
+
         com_ptr<ID3D11VideoProcessor> processor{};
-        REQUIRE(video_device->CreateVideoProcessor(enumerator.get(), index, processor.put()) == S_OK);
+        REQUIRE(video_device->CreateVideoProcessor(enumerator.get(), conversion, processor.put()) == S_OK);
     }
 }
 
@@ -315,7 +340,7 @@ TEST_CASE_METHOD(dxva_test_case, "DirectX Surface Buffer(MF_SA_D3D11_SHARED)") {
 
 struct dxva_tex2d_test_case : public dx11_test_case {
     HRESULT make_texture(ID3D11Texture2D** texture) {
-        D3D11_TEXTURE2D_DESC desc;
+        D3D11_TEXTURE2D_DESC desc{};
         desc.Width = 256;
         desc.Height = 256;
         desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;

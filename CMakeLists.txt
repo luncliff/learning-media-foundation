@@ -45,6 +45,8 @@ find_package(directxmath CONFIG REQUIRED)
 add_executable(media_test_suite
     test/test_main.cpp
     test/test_dxva.cpp
+    test/test_mf_transform.cpp
+    test/string.cpp
 )
 
 target_compile_definitions(media_test_suite
