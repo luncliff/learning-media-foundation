@@ -1,0 +1,43 @@
+//
+// @see https://docs.microsoft.com/en-us/uwp/midl-3/intro
+// @see https://docs.microsoft.com/en-us/uwp/midl-3/from-midlrt
+// @see https://docs.microsoft.com/en-us/windows/uwp/cpp-and-winrt-apis/intro-to-using-cpp-with-winrt
+// @see https://docs.microsoft.com/en-us/windows/win32/com/anatomy-of-an-idl-file
+//
+// #include <sdkddkver.h>
+
+// .../Windows Kits/10/include/10.0.19041.0/winrt/Windows.Foundation.idl
+import "Windows.Foundation.idl";
+import "mftransform.idl";
+
+// @see https://docs.microsoft.com/en-us/windows/uwp/winrt-components/create-a-windows-runtime-component-in-cppwinrt
+namespace Exp
+{
+    // MIDL 2
+    [uuid(7B917902-D657-4437-9F93-93B94482F286), version(1.0), pointer_default(unique)]
+    interface IExpMFT0 : IInspectable {
+        HRESULT SetState([in] UINT32 state);
+        HRESULT GetState([out] UINT32* pState);
+    };
+
+    // MIDL 3
+    [uuid(7B917902-D657-4437-9F93-93B94482F287), version(1.0), pointer_default(unique)]
+    interface IExpMFT1 {
+        UInt32 State;
+        Windows.Foundation.IAsyncOperation<String> TransformAsync(UInt32 count);
+    };
+
+    delegate void Handler00(Boolean arg);
+
+    runtimeclass Rc0
+    {
+        Rc0();
+
+        String Name{ get; };
+        Single Intensity;
+
+        Windows.Foundation.IAsyncAction StartAsync();
+
+        event Handler00 Poll;
+    }
+}

@@ -43,6 +43,7 @@ find_package(directxtex CONFIG REQUIRED)
 find_package(directxmath CONFIG REQUIRED)
 
 add_executable(media_test_suite
+    test/dllmain.cpp
     test/test_main.cpp
     test/test_dxva.cpp
     test/test_mf_transform.cpp
@@ -89,7 +90,10 @@ list(APPEND BUILD_COMPILE_DEFINITIONS
     SOURCE_COMMIT_ID="${GIT_COMMIT_ID}"
     SOURCE_TIMESTAMP="${BUILD_TIMESTAMP}"
 )
-
+set_source_files_properties(test/dllmain.cpp
+PROPERTIES
+    COMPILE_DEFINITIONS "${BUILD_COMPILE_DEFINITIONS}"
+)
 set_source_files_properties(test/test_main.cpp
 PROPERTIES
     COMPILE_DEFINITIONS "${BUILD_COMPILE_DEFINITIONS}"
@@ -107,7 +111,24 @@ set(CPACK_RESOURCE_FILE_README ${PROJECT_SOURCE_DIR}/readme.md)
 set(CPACK_GENERATOR "ZIP")
 include(CPack)
 
-find_package(glfw3 CONFIG REQUIRED)
+if(SUPPORT_REGISTRY_TARGETS)
+    find_program(REGSVR_EXE NAMES regsvr32 REQUIRED)
+    message(STATUS "Using regsvr32: ${REGSVR_EXE}")
+    # find_program(PWSH_EXE NAMES powershell pwsh REQUIRED)
+    # message(STATUS "Using PowerShell: ${PWSH_EXE}")
+    # add_custom_target(register
+    #     COMMAND "${REGSVR_EXE}" media.dll /s
+    #     # COMMAND "${PWSH_EXE}" Get-Content register.log
+    #     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}
+    # )
+    # add_custom_target(unregister
+    #     COMMAND "${REGSVR_EXE}" /u media.dll /s
+    #     # COMMAND "${PWSH_EXE}" Get-Content unregister.log
+    #     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}
+    # )
+endif()
+
+# find_package(glfw3 CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
 include(Catch)
 
@@ -121,7 +142,7 @@ PRIVATE
 
 target_link_libraries(media_test_suite
 PRIVATE
-    Catch2::Catch2 glfw
+    Catch2::Catch2
 )
 
 get_filename_component(ASSET_DIR    ${PROJECT_SOURCE_DIR}/assets ABSOLUTE)
