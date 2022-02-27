@@ -33,6 +33,9 @@ struct video_transform_test_case {
     DWORD reader_stream = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
 
   public:
+    video_transform_test_case() {
+        open(get_asset_dir() / "test-sample-0.mp4");
+    }
     ~video_transform_test_case() {
         const auto hr = source->Shutdown();
         if (SUCCEEDED(hr))
@@ -78,7 +81,7 @@ struct video_transform_test_case {
             return hr;
         if (auto hr = source_type->SetGUID(MF_MT_SUBTYPE, subtype); FAILED(hr))
             return hr;
-        return reader->SetCurrentMediaType(reader_stream, NULL, source_type.get());
+        return reader->SetCurrentMediaType(reader_stream, nullptr, source_type.get());
     }
 
   public:
@@ -156,10 +159,10 @@ struct video_transform_test_case {
     }
 
     /// @todo use GPU buffer
-    static HRESULT get_transform_output(IMFTransform* transform, DWORD stream_id, //
-                                        IMFSample** sample, GUID& subtype, BOOL& flushed) {
+    static HRESULT get_transform_output(IMFTransform* transform, DWORD ostream, IMFSample** sample, GUID& subtype,
+                                        BOOL& flushed) {
         MFT_OUTPUT_STREAM_INFO stream_info{};
-        if (auto hr = transform->GetOutputStreamInfo(stream_id, &stream_info); FAILED(hr))
+        if (auto hr = transform->GetOutputStreamInfo(ostream, &stream_info); FAILED(hr))
             return hr;
 
         flushed = FALSE;
@@ -171,21 +174,24 @@ struct video_transform_test_case {
                 return hr;
             output.pSample = *sample;
         }
+
         DWORD status = 0;
         HRESULT const result = transform->ProcessOutput(0, 1, &output, &status);
         if (result == S_OK) {
             *sample = output.pSample;
             return S_OK;
         }
-        // see https://docs.microsoft.com/en-us/windows/win32/medfound/handling-stream-changes
+
+        /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/handling-stream-changes
         if (result == MF_E_TRANSFORM_STREAM_CHANGE) {
             com_ptr<IMFMediaType> changed_output_type{};
             if (output.dwStatus != MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE) {
                 // todo: add more works for this case
                 return E_NOTIMPL;
             }
+
             // query the output type and its subtype
-            if (auto hr = transform->GetOutputAvailableType(stream_id, 0, changed_output_type.put()); FAILED(hr))
+            if (auto hr = transform->GetOutputAvailableType(ostream, 0, changed_output_type.put()); FAILED(hr))
                 return hr;
             // check new output media type
             if (auto hr = changed_output_type->GetGUID(MF_MT_SUBTYPE, &subtype); FAILED(hr))
@@ -212,7 +218,7 @@ struct video_transform_test_case {
                                                     input_sample.put());
                 FAILED(hr)) {
                 CAPTURE(sample_flags);
-                FAIL(hr);
+                FAIL(static_cast<uint32_t>(hr));
             }
             if (sample_flags & MF_SOURCE_READERF_ENDOFSTREAM) {
                 input_available = false;
@@ -229,7 +235,7 @@ struct video_transform_test_case {
             case MF_E_UNSUPPORTED_D3D_TYPE:
             case E_INVALIDARG:
             default:
-                FAIL(hr);
+                FAIL(static_cast<uint32_t>(hr));
             }
             while (true) {
                 BOOL flushed = FALSE;
@@ -239,7 +245,7 @@ struct video_transform_test_case {
                 if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
                     break;
                 if (FAILED(hr))
-                    FAIL(hr);
+                    FAIL(static_cast<uint32_t>(hr));
             }
         }
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
@@ -253,16 +259,59 @@ struct video_transform_test_case {
             if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
                 break;
             if (FAILED(hr))
-                FAIL(hr);
+                FAIL(static_cast<uint32_t>(hr));
             // processed output
         }
     }
+
+    static HRESULT configure_rectangle(IMFVideoProcessorControl* control, IMFMediaType* media_type) noexcept {
+        UINT32 w = 0, h = 0;
+        if (auto hr = MFGetAttributeSize(media_type, MF_MT_FRAME_SIZE, &w, &h); FAILED(hr))
+            return hr;
+        RECT rect{};
+        rect.right = w; // LTRB rectangle
+        rect.bottom = h;
+        if (auto hr = control->SetSourceRectangle(&rect); FAILED(hr))
+            return hr;
+        return control->SetDestinationRectangle(&rect);
+    }
+
+    /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/videoresizer
+    static HRESULT configure_source_rectangle(IPropertyStore* props, const RECT& rect) noexcept {
+        PROPVARIANT val{};
+        val.intVal = rect.left;
+        if (auto hr = props->SetValue(MFPKEY_RESIZE_SRC_LEFT, val); FAILED(hr))
+            return hr;
+        val.intVal = rect.top;
+        if (auto hr = props->SetValue(MFPKEY_RESIZE_SRC_TOP, val); FAILED(hr))
+            return hr;
+        val.intVal = rect.right - rect.left;
+        if (auto hr = props->SetValue(MFPKEY_RESIZE_SRC_WIDTH, val); FAILED(hr))
+            return hr;
+        val.intVal = rect.bottom - rect.top;
+        return props->SetValue(MFPKEY_RESIZE_SRC_HEIGHT, val);
+    }
+
+    /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/videoresizer
+    static HRESULT configure_destination_rectangle(IPropertyStore* props, const RECT& rect) noexcept {
+        PROPVARIANT val{};
+        val.intVal = rect.left;
+        if (auto hr = props->SetValue(MFPKEY_RESIZE_DST_LEFT, val); FAILED(hr))
+            return hr;
+        val.intVal = rect.top;
+        if (auto hr = props->SetValue(MFPKEY_RESIZE_DST_TOP, val); FAILED(hr))
+            return hr;
+        val.intVal = rect.right - rect.left;
+        if (auto hr = props->SetValue(MFPKEY_RESIZE_DST_WIDTH, val); FAILED(hr))
+            return hr;
+        val.intVal = rect.bottom - rect.top;
+        return props->SetValue(MFPKEY_RESIZE_DST_HEIGHT, val);
+    }
 };
 
-// see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
-// see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
 TEST_CASE_METHOD(video_transform_test_case, "MFTransform - MFVideoFormat_H264", "[codec]") {
-    open(get_asset_dir() / "test-sample-0.mp4");
     REQUIRE(set_subtype(MFVideoFormat_H264) == S_OK);
 
     com_ptr<IMFTransform> transform{};
@@ -340,6 +389,190 @@ TEST_CASE_METHOD(video_transform_test_case, "MFTransform - MFVideoFormat_H264", 
         REQUIRE(status == MFT_INPUT_STATUS_ACCEPT_DATA);
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        consume(reader, transform, istream, ostream);
+    }
+}
+
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/colorconverter
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
+TEST_CASE_METHOD(video_transform_test_case, "MFTransform - CLSID_CColorConvertDMO", "[dsp]") {
+    com_ptr<IMFTransform> transform{};
+    REQUIRE(make_transform_video(transform.put(), CLSID_CColorConvertDMO) == S_OK);
+    com_ptr<IPropertyStore> props{};
+    {
+        REQUIRE(transform->QueryInterface(props.put()) == S_OK);
+        PROPVARIANT var{};
+        REQUIRE(SUCCEEDED(props->GetValue(MFPKEY_COLORCONV_MODE, &var)));
+        // spdlog::debug("- MFPKEY_COLORCONV_MODE: {}", var.intVal == 0 ? "Progressive" : "Interlaced");
+        // Microsoft DirectX Media Object https://docs.microsoft.com/en-us/previous-versions/windows/desktop/api/mediaobj/nn-mediaobj-imediaobject
+        com_ptr<IMediaObject> media_object{};
+        REQUIRE(transform->QueryInterface(media_object.put()) == S_OK);
+    }
+
+    com_ptr<IMFSourceReaderEx> source_reader = reader;
+    DWORD istream = 0;
+    DWORD ostream = 0;
+    SECTION("RGB32 - I420") {
+        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output_type = make_output(source_type, MFVideoFormat_I420);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        consume(source_reader, transform, istream, ostream);
+    }
+    SECTION("RGB32 - IYUV") {
+        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output_type = make_output(source_type, MFVideoFormat_IYUV);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        consume(source_reader, transform, istream, ostream);
+    }
+    SECTION("NV12 - RGB32") {
+        REQUIRE(set_subtype(MFVideoFormat_NV12) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output_type = make_output(source_type, MFVideoFormat_RGB32);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        consume(source_reader, transform, istream, ostream);
+    }
+    SECTION("I420 - RGB32") {
+        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output_type = make_output(source_type, MFVideoFormat_RGB32);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        consume(source_reader, transform, istream, ostream);
+    }
+    SECTION("I420 - RGB565") {
+        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output_type = make_output(source_type, MFVideoFormat_RGB565);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        consume(source_reader, transform, istream, ostream);
+    }
+}
+
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/videoresizer
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
+TEST_CASE_METHOD(video_transform_test_case, "MFTransform - Video Resizer DSP", "[dsp][!mayfail]") {
+    com_ptr<IMFTransform> transform{};
+    REQUIRE(make_transform_video(transform.put(), CLSID_CResizerDMO) == S_OK);
+    com_ptr<IWMResizerProps> resizer{};
+    REQUIRE(transform->QueryInterface(resizer.put()) == S_OK);
+
+    DWORD num_input = 0;
+    DWORD num_output = 0;
+    REQUIRE(transform->GetStreamCount(&num_input, &num_output) == S_OK);
+    const DWORD istream = num_input - 1;
+    const DWORD ostream = num_output - 1;
+
+    SECTION("RGB32") {
+        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        REQUIRE(transform->SetOutputType(ostream, source_type.get(), 0) == S_OK);
+
+        UINT32 width = 0, height = 0;
+        MFGetAttributeSize(source_type.get(), MF_MT_FRAME_SIZE, &width, &height);
+        REQUIRE(resizer->SetClipRegion(0, 0, width / 2, height / 2) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        consume(reader, transform, istream, ostream);
+    }
+    SECTION("I420") {
+        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        REQUIRE(transform->SetOutputType(ostream, source_type.get(), 0) == S_OK);
+
+        UINT32 width = 0, height = 0;
+        MFGetAttributeSize(source_type.get(), MF_MT_FRAME_SIZE, &width, &height);
+        REQUIRE(resizer->SetClipRegion(0, 0, width / 2, height / 2) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        consume(reader, transform, istream, ostream);
+    }
+    SECTION("NV12") {
+        REQUIRE(set_subtype(MFVideoFormat_NV12) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) != S_OK);
+    }
+}
+
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/video-processor-mft#remarks
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
+TEST_CASE_METHOD(video_transform_test_case, "MFTransform - Video Processor MFT", "[dsp][!mayfail]") {
+    REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+
+    com_ptr<IMFTransform> transform{};
+    REQUIRE(make_transform_video(transform.put(), CLSID_VideoProcessorMFT) == S_OK);
+
+    DWORD num_input = 0;
+    DWORD num_output = 0;
+    REQUIRE(transform->GetStreamCount(&num_input, &num_output) == S_OK);
+    const DWORD istream = num_input - 1;
+    const DWORD ostream = num_output - 1;
+
+    // https://docs.microsoft.com/en-us/windows/win32/medfound/media-foundation-work-queue-and-threading-improvements
+    com_ptr<IMFRealTimeClientEx> realtime{};
+    REQUIRE(transform->QueryInterface(realtime.put()) == S_OK);
+
+    com_ptr<IMFVideoProcessorControl> control{};
+    REQUIRE(transform->QueryInterface(control.put()) == S_OK);
+
+    SECTION("MIRROR_HORIZONTAL/ROTAION_NORMAL") {
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        REQUIRE(transform->SetOutputType(ostream, source_type.get(), 0) == S_OK);
+
+        REQUIRE(configure_rectangle(control.get(), source_type.get()) == S_OK);
+        // H mirror, corrects the orientation, letterboxes the output as needed
+        REQUIRE(control->SetMirror(MF_VIDEO_PROCESSOR_MIRROR::MIRROR_HORIZONTAL) == S_OK);
+        REQUIRE(control->SetRotation(MF_VIDEO_PROCESSOR_ROTATION::ROTATION_NORMAL) == S_OK);
+        MFARGB color{};
+        REQUIRE(control->SetBorderColor(&color) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_VideoProcessorMFT won't have leftover
+        consume(reader, transform, istream, ostream);
+    }
+    SECTION("MIRROR_VERTICAL/ROTAION_NORMAL") {
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        REQUIRE(transform->SetOutputType(ostream, source_type.get(), 0) == S_OK);
+
+        REQUIRE(configure_rectangle(control.get(), source_type.get()) == S_OK);
+        // H mirror, corrects the orientation, letterboxes the output as needed
+        REQUIRE(control->SetMirror(MF_VIDEO_PROCESSOR_MIRROR::MIRROR_VERTICAL) == S_OK);
+        REQUIRE(control->SetRotation(MF_VIDEO_PROCESSOR_ROTATION::ROTATION_NORMAL) == S_OK);
+        MFARGB color{};
+        REQUIRE(control->SetBorderColor(&color) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        // CLSID_VideoProcessorMFT won't have leftover
         consume(reader, transform, istream, ostream);
     }
 }
