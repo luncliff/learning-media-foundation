@@ -307,6 +307,7 @@ struct video_transform_test_case {
     }
 
     static HRESULT consume(com_ptr<IMFSourceReader> source_reader, DWORD istream) {
+        size_t count = 0;
         bool input_available = true;
         while (input_available) {
             DWORD stream_index{};
@@ -327,7 +328,9 @@ struct video_transform_test_case {
             if (input_sample == nullptr)
                 continue;
             input_sample->SetSampleTime(sample_timestamp);
+            ++count;
         }
+        spdlog::debug("sample: {}", count);
         return S_OK;
     }
 
