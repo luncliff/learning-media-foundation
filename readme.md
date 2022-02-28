@@ -16,10 +16,14 @@ Windows SDK 10.0.19041.0 or later
 * [Media Foundation and DirectShow Media Types](https://gix.github.io/media-types/)
 * [Supported Media Formats in Media Foundation](https://docs.microsoft.com/en-us/windows/win32/medfound/supported-media-formats-in-media-foundation)
 * **https://github.com/microsoft/media-foundation**
+    * [Windows Driver Samples](https://github.com/microsoft/windows-driver-samples)
+        * avstream
+    * [Windows Universal Samples](https://github.com/microsoft/windows-universal-samples)
+    * [Windows Classic Samples](https://github.com/microsoft/windows-classic-samples)
+        * https://docs.microsoft.com/en-us/windows/win32/medfound/supporting-direct3d-11-video-decoding-in-media-foundation
+* https://developer.amd.com/wordpress/media/2013/11/MediaSDK_User_Guide.pdf
 * https://github.com/sipsorcery/mediafoundationsamples
 * https://github.com/roman380/msdnblogsmfsamples
-* https://docs.microsoft.com/en-us/windows/win32/medfound/supporting-direct3d-11-video-decoding-in-media-foundation
-* http://developer.amd.com/wordpress/media/2013/11/MediaSDK_User_Guide.pdf
 
 #### Web
 

@@ -1,9 +1,10 @@
 #include <catch2/catch.hpp>
 
-// clang-format off
+// clang-format OFF
 #include <Windows.h>
 #include <d3d11_4.h>
 #include <d3d9.h>
+#include <evr.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -13,6 +14,7 @@
 #include <codecapi.h>
 #include <dxva2api.h>
 #include <mediaobj.h>
+#include <mmdeviceapi.h>
 #include <wmcodecdsp.h>
 // clang-format on
 #include <filesystem>
@@ -24,6 +26,98 @@ namespace fs = std::filesystem;
 using winrt::com_ptr;
 
 fs::path get_asset_dir() noexcept;
+
+struct video_buffer_test_case {
+    com_ptr<ID3D11Device> device{};
+    D3D_FEATURE_LEVEL device_feature_level{};
+    com_ptr<ID3D11DeviceContext> device_context{};
+
+  public:
+    video_buffer_test_case() {
+        D3D_FEATURE_LEVEL levels[]{D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
+        if (auto hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, NULL,
+                                        D3D11_CREATE_DEVICE_SINGLETHREADED | D3D11_CREATE_DEVICE_BGRA_SUPPORT |
+                                            D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                                        levels, 2, D3D11_SDK_VERSION, device.put(), &device_feature_level,
+                                        device_context.put());
+            FAILED(hr))
+            FAIL(hr);
+        com_ptr<ID3D10Multithread> threading{};
+        if (auto hr = device->QueryInterface(threading.put()); SUCCEEDED(hr))
+            threading->SetMultithreadProtected(true);
+    }
+
+  public:
+    HRESULT make_texture(ID3D11Texture2D** texture) {
+        D3D11_TEXTURE2D_DESC desc;
+        desc.Width = 256;
+        desc.Height = 256;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        desc.CPUAccessFlags = 0;                     // todo: use D3D11_CPU_ACCESS_WRITE?
+        desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED; // todo: use D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX?
+        return device->CreateTexture2D(&desc, nullptr, texture);
+    }
+
+    /// @see https://docs.microsoft.com/en-us/windows/win32/api/evr/nc-evr-mfcreatevideosamplefromsurface
+    static HRESULT make_texture_surface(ID3D11Texture2D* tex2d, IMFSample** ptr) {
+        // Create a DXGI media buffer by calling the MFCreateDXGISurfaceBuffer function.
+        // Pass in the ID3D11Texture2D pointer and the offset for each element in the texture array.
+        // The function returns an IMFMediaBuffer pointer.
+        com_ptr<IMFMediaBuffer> buffer{};
+        if (auto hr = MFCreateDXGISurfaceBuffer(IID_ID3D11Texture2D, tex2d, 0, false, buffer.put()); FAILED(hr))
+            return hr;
+
+        // Create an empty media sample by calling the MFCreateVideoSampleFromSurface function.
+        // Set the pUnkSurface parameter equal to NULL. The function returns an IMFSample pointer.
+        com_ptr<IMFSample> sample{};
+        if (auto hr = MFCreateVideoSampleFromSurface(nullptr, sample.put()); FAILED(hr))
+            return hr;
+
+        // Call IMFSample::AddBuffer to add the media buffer to the sample.
+        auto hr = sample->AddBuffer(buffer.get());
+        if (SUCCEEDED(hr)) {
+            *ptr = sample.get();
+            sample->AddRef();
+        }
+        return hr;
+    }
+};
+
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/uncompressed-video-buffers
+TEST_CASE_METHOD(video_buffer_test_case, "Uncompressed Video Buffer") {
+    com_ptr<ID3D11Texture2D> tex2d{};
+    if (auto hr = make_texture(tex2d.put()); FAILED(hr))
+        FAIL(hr);
+
+    com_ptr<IMFMediaBuffer> buffer{};
+    if (auto hr = MFCreateDXGISurfaceBuffer(IID_ID3D11Texture2D, tex2d.get(), 0, false, buffer.put()); FAILED(hr))
+        FAIL(hr);
+
+    SECTION("IMFDXGIBuffer") {
+        com_ptr<IMFDXGIBuffer> dxgi{};
+        REQUIRE(buffer->QueryInterface(dxgi.put()) == S_OK);
+        com_ptr<ID3D11Texture2D> texture{}; // should be same with `tex2d` above
+        REQUIRE(dxgi->GetResource(IID_PPV_ARGS(texture.put())) == S_OK);
+        D3D11_TEXTURE2D_DESC desc{};
+        texture->GetDesc(&desc);
+        REQUIRE(desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM);
+    }
+    SECTION("IMF2DBuffer2") {
+        com_ptr<IMF2DBuffer2> buf2d{};
+        REQUIRE(buffer->QueryInterface(buf2d.put()) == S_OK);
+    }
+    /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/directx-surface-buffer
+    SECTION("IDirect3DSurface9") {
+        com_ptr<IDirect3DSurface9> surface{};
+        REQUIRE(MFGetService(buffer.get(), MR_BUFFER_SERVICE, IID_PPV_ARGS(surface.put())) == E_NOINTERFACE);
+    }
+}
 
 struct video_transform_test_case {
     com_ptr<IMFMediaSourceEx> source{};
@@ -553,8 +647,9 @@ TEST_CASE_METHOD(video_transform_test_case, "MFTransform - Video Resizer DSP", "
 
         UINT32 width = 0, height = 0;
         MFGetAttributeSize(source_type.get(), MF_MT_FRAME_SIZE, &width, &height);
-        REQUIRE(resizer->SetClipRegion(0, 0, width / 2, height / 2) == S_OK);
-        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, width / 2, height / 2) == S_OK);
+        CAPTURE(width, height);
+        REQUIRE(resizer->SetClipRegion(0, 0, 640, 480) == S_OK);
+        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, 640, 480) == S_OK);
 
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
@@ -569,8 +664,9 @@ TEST_CASE_METHOD(video_transform_test_case, "MFTransform - Video Resizer DSP", "
 
         UINT32 width = 0, height = 0;
         MFGetAttributeSize(source_type.get(), MF_MT_FRAME_SIZE, &width, &height);
-        REQUIRE(resizer->SetClipRegion(0, 0, width / 2, height / 2) == S_OK);
-        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, width / 2, height / 2) == S_OK);
+        CAPTURE(width, height);
+        REQUIRE(resizer->SetClipRegion(0, 0, 640, 480) == S_OK);
+        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, 640, 480) == S_OK);
 
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
