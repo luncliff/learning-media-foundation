@@ -17,6 +17,7 @@
 #include <mmdeviceapi.h>
 #include <wmcodecdsp.h>
 // clang-format on
+#include <experimental/generator>
 #include <filesystem>
 #include <spdlog/spdlog.h>
 #include <winrt/Windows.Foundation.h>
@@ -26,6 +27,12 @@ namespace fs = std::filesystem;
 using winrt::com_ptr;
 
 fs::path get_asset_dir() noexcept;
+
+void report_error(HRESULT hr, const char* fname) noexcept {
+    winrt::hresult_error ex{hr};
+    spdlog::error("{}: {:#08x} {}", fname, static_cast<uint32_t>(ex.code()), winrt::to_string(ex.message()));
+}
+std::string to_mf_string(const GUID& guid) noexcept;
 
 struct video_buffer_test_case {
     com_ptr<ID3D11Device> device{};
@@ -119,53 +126,112 @@ TEST_CASE_METHOD(video_buffer_test_case, "Uncompressed Video Buffer") {
     }
 }
 
-struct video_transform_test_case {
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/video-subtype-guids
+/// @see https://stackoverflow.com/a/9681384
+void print(IMFMediaType* media_type) noexcept {
+    GUID major{};
+    media_type->GetGUID(MF_MT_MAJOR_TYPE, &major);
+    spdlog::info("- media_type:");
+    spdlog::info("  {}: {}", "major", to_mf_string(major));
+
+    if (major == MFMediaType_Audio) {
+        GUID subtype{};
+        if SUCCEEDED (media_type->GetGUID(MF_MT_SUBTYPE, &subtype))
+            spdlog::info("  {}: {}", "subtype", to_mf_string(subtype));
+        return;
+    }
+    if (major == MFMediaType_Video) {
+        GUID subtype{};
+        if SUCCEEDED (media_type->GetGUID(MF_MT_SUBTYPE, &subtype))
+            spdlog::info("  {}: {}", "subtype", to_mf_string(subtype));
+
+        UINT32 value = FALSE;
+        if SUCCEEDED (media_type->GetUINT32(MF_MT_COMPRESSED, &value))
+            spdlog::info("  {}: {}", "compressed", static_cast<bool>(value));
+        if SUCCEEDED (media_type->GetUINT32(MF_MT_FIXED_SIZE_SAMPLES, &value))
+            spdlog::info("  {}: {}", "fixed_size", static_cast<bool>(value));
+        if SUCCEEDED (media_type->GetUINT32(MF_MT_AVG_BITRATE, &value))
+            spdlog::info("  {}: {}", "bitrate", value);
+        if SUCCEEDED (media_type->GetUINT32(MF_MT_INTERLACE_MODE, &value)) {
+            switch (value) {
+            case MFVideoInterlace_MixedInterlaceOrProgressive:
+                spdlog::info("  {}: {}", "interlace", "MixedInterlaceOrProgressive");
+                break;
+            case MFVideoInterlace_Progressive:
+                spdlog::info("  {}: {}", "interlace", "Progressive");
+                break;
+            case MFVideoInterlace_Unknown:
+                [[fallthrough]];
+            default:
+                spdlog::info("  {}: {}", "interlace", "Unknown");
+                break;
+            }
+        }
+
+        UINT32 num = 0, denom = 1;
+        if SUCCEEDED (MFGetAttributeRatio(media_type, MF_MT_FRAME_RATE, &num, &denom))
+            spdlog::info("  {}: {:.1f}", "fps", static_cast<float>(num) / denom);
+        if SUCCEEDED (MFGetAttributeRatio(media_type, MF_MT_PIXEL_ASPECT_RATIO, &num, &denom))
+            spdlog::info("  {}: {}", "aspect_ratio", static_cast<float>(num) / denom);
+
+        UINT32 w = 0, h = 0;
+        if SUCCEEDED (MFGetAttributeSize(media_type, MF_MT_FRAME_SIZE, &w, &h)) {
+            spdlog::info("  {}: {}", "width", w);
+            spdlog::info("  {}: {}", "height", h);
+        }
+    }
+}
+
+struct video_reader_test_case {
     com_ptr<IMFMediaSourceEx> source{};
+    com_ptr<IMFMediaType> native_type{};
     com_ptr<IMFMediaType> source_type{};
     com_ptr<IMFSourceReaderEx> reader{}; // expose IMFTransform for each stream
-    com_ptr<IMFSourceReaderCallback> reader_callback{};
-    DWORD reader_stream = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+    const DWORD reader_stream = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
 
   public:
-    video_transform_test_case() {
+    video_reader_test_case() {
         open(get_asset_dir() / "test-sample-0.mp4");
+        print(native_type.get());
     }
-    ~video_transform_test_case() {
-        const auto hr = source->Shutdown();
-        if (SUCCEEDED(hr))
-            return;
-        report_error(hr, __func__);
+    ~video_reader_test_case() {
+        if (auto hr = source->Shutdown(); FAILED(hr))
+            report_error(hr, __func__);
     }
 
   public:
-    void open(IMFActivate* device) {
+    HRESULT open(IMFActivate* device) {
         if (auto hr = device->ActivateObject(__uuidof(IMFMediaSourceEx), source.put_void()); FAILED(hr))
-            winrt::throw_hresult(hr);
+            return hr;
         com_ptr<IMFSourceReader> source_reader{};
         if (auto hr = MFCreateSourceReaderFromMediaSource(source.get(), nullptr, source_reader.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
+            return hr;
         if (auto hr = source_reader->QueryInterface(reader.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = reader->GetNativeMediaType(reader_stream, 0, source_type.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
+            return hr;
+        if (auto hr = reader->GetNativeMediaType(reader_stream, 0, native_type.put()); FAILED(hr))
+            return hr;
+        source_type = native_type;
+        return S_OK;
     }
 
-    void open(fs::path p) noexcept(false) {
+    HRESULT open(fs::path p) noexcept(false) {
         MF_OBJECT_TYPE source_object_type = MF_OBJECT_INVALID;
         if (auto hr = resolve(p.generic_wstring(), source.put(), source_object_type); FAILED(hr))
-            winrt::throw_hresult(hr);
+            return hr;
         com_ptr<IMFAttributes> attrs{};
         if (auto hr = MFCreateAttributes(attrs.put(), 2); FAILED(hr))
-            winrt::throw_hresult(hr);
+            return hr;
         attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
         attrs->SetUINT32(MF_READWRITE_DISABLE_CONVERTERS, FALSE);
         com_ptr<IMFSourceReader> source_reader{};
         if (auto hr = MFCreateSourceReaderFromMediaSource(source.get(), attrs.get(), source_reader.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
+            return hr;
         if (auto hr = source_reader->QueryInterface(reader.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = reader->GetNativeMediaType(reader_stream, 0, source_type.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
+            return hr;
+        if (auto hr = reader->GetNativeMediaType(reader_stream, 0, native_type.put()); FAILED(hr))
+            return hr;
+        source_type = native_type;
+        return S_OK;
     }
 
     HRESULT set_subtype(const GUID& subtype) noexcept {
@@ -178,32 +244,6 @@ struct video_transform_test_case {
     }
 
   public:
-    static void report_error(HRESULT hr, const char* fname) noexcept {
-        winrt::hresult_error ex{hr};
-        spdlog::error("{}: {:#08x} {}", fname, static_cast<uint32_t>(ex.code()), winrt::to_string(ex.message()));
-    }
-
-    static HRESULT make_transform_video(IMFTransform** transform, const IID& iid) noexcept {
-        com_ptr<IUnknown> unknown{};
-        if (auto hr = CoCreateInstance(iid, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
-            return hr;
-        return unknown->QueryInterface(transform);
-    }
-
-    // @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder#transform-attributes
-    static HRESULT configure_acceleration_H264(IMFTransform* transform) noexcept {
-        com_ptr<IMFAttributes> attrs{};
-        if (auto hr = transform->GetAttributes(attrs.put()); FAILED(hr))
-            return hr;
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE); FAILED(hr))
-            spdlog::error("CODECAPI_AVDecVideoAcceleration_H264: {:#08x}", hr);
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE); FAILED(hr))
-            spdlog::error("CODECAPI_AVLowLatencyMode: {:#08x}", hr);
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecNumWorkerThreads, 1); FAILED(hr))
-            spdlog::error("CODECAPI_AVDecNumWorkerThreads: {:#08x}", hr);
-        return S_OK;
-    }
-
     static HRESULT resolve(const std::wstring& fpath, IMFMediaSourceEx** source,
                            MF_OBJECT_TYPE& media_object_type) noexcept {
         com_ptr<IMFSourceResolver> resolver{};
@@ -215,6 +255,169 @@ struct video_transform_test_case {
             FAILED(hr))
             return hr;
         return unknown->QueryInterface(source);
+    }
+
+    static HRESULT consume(com_ptr<IMFSourceReaderEx> source_reader, DWORD istream, size_t& count) {
+        bool input_available = true;
+        while (input_available) {
+            DWORD stream_index{};
+            DWORD sample_flags{};
+            LONGLONG sample_timestamp = 0; // unit 100-nanosecond
+            com_ptr<IMFSample> input_sample{};
+            if (auto hr = source_reader->ReadSample(istream, 0, &stream_index, &sample_flags, &sample_timestamp,
+                                                    input_sample.put());
+                FAILED(hr)) {
+                CAPTURE(sample_flags);
+                return hr;
+            }
+            if (sample_flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+                input_available = false;
+                continue;
+            }
+            // probably MF_SOURCE_READERF_STREAMTICK
+            if (input_sample == nullptr)
+                continue;
+            input_sample->SetSampleTime(sample_timestamp);
+            ++count;
+        }
+        return S_OK;
+    }
+
+    static auto consume(com_ptr<IMFSourceReaderEx> reader, DWORD stream_index)
+        -> std::experimental::generator<com_ptr<IMFSample>> {
+        while (true) {
+            DWORD actual_index{};
+            DWORD flags{};
+            LONGLONG timestamp = 0; // unit 100-nanosecond
+            com_ptr<IMFSample> sample{};
+            if (auto hr = reader->ReadSample(stream_index, 0, &actual_index, &flags, &timestamp, sample.put());
+                FAILED(hr)) {
+                spdlog::error("{}: {:#08x}", "ReadSample", hr);
+                co_return;
+            }
+            if (flags & MF_SOURCE_READERF_ENDOFSTREAM)
+                co_return;
+            // probably MF_SOURCE_READERF_STREAMTICK
+            if (sample == nullptr)
+                continue;
+            sample->SetSampleTime(timestamp);
+            co_yield sample;
+        }
+    }
+
+    static com_ptr<IMFMediaType> copy_video_type(IMFMediaType* input) noexcept(false) {
+        com_ptr<IMFMediaType> output{};
+        if (auto hr = MFCreateMediaType(output.put()); FAILED(hr))
+            winrt::throw_hresult(hr);
+        if (auto hr = input->CopyAllItems(output.get()); FAILED(hr))
+            winrt::throw_hresult(hr);
+        return output;
+    }
+
+    /// @see https://docs.microsoft.com/en-us/windows/win32/api/mfobjects/nn-mfobjects-imfmediabuffer
+    static HRESULT create_single_buffer_sample(IMFSample** output, DWORD bufsz) {
+        if (auto hr = MFCreateSample(output); FAILED(hr))
+            return hr;
+        com_ptr<IMFMediaBuffer> buffer{};
+        if (auto hr = MFCreateMemoryBuffer(bufsz, buffer.put()); FAILED(hr))
+            return hr;
+        // GetMaxLength will be length of the available memory location
+        // GetCurrentLength will be 0
+        IMFSample* sample = *output;
+        return sample->AddBuffer(buffer.get());
+    }
+};
+
+TEST_CASE_METHOD(video_reader_test_case, "IMFSourceReader - H264", "[codec]") {
+    GUID subtype{};
+    REQUIRE(source_type->GetGUID(MF_MT_SUBTYPE, &subtype) == S_OK);
+    REQUIRE(IsEqualGUID(subtype, MFVideoFormat_H264));
+
+    size_t num_frame = 0;
+    constexpr DWORD istream = 0;
+    SECTION("RGB32") {
+        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+        REQUIRE(consume(reader, istream, num_frame) == S_OK);
+        spdlog::debug("sample count: {}", num_frame);
+    }
+    SECTION("NV12") {
+        REQUIRE(set_subtype(MFVideoFormat_NV12) == S_OK);
+        REQUIRE(consume(reader, istream, num_frame) == S_OK);
+    }
+    SECTION("I420") {
+        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
+        REQUIRE(consume(reader, istream, num_frame) == S_OK);
+    };
+}
+
+/**
+ * @brief `IMFTransform` owner for `MFVideoFormat_H264`
+ * @todo Support `MFVideoFormat_H264_ES`, `MFVideoFormat_H264_HDCP`
+ * @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
+ * @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
+ */
+struct h264_decoder_t {
+    com_ptr<IMFTransform> transform{};
+
+  public:
+    explicit h264_decoder_t(const GUID& clsid = CLSID_CMSH264DecoderMFT) noexcept(false) {
+        com_ptr<IUnknown> unknown{};
+        if (auto hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
+            winrt::throw_hresult(hr);
+        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
+            winrt::throw_hresult(hr);
+        configure_acceleration_H264(transform.get());
+    }
+
+    bool support(IMFMediaType* source_type) const noexcept {
+        GUID subtype{};
+        if FAILED (source_type->GetGUID(MF_MT_SUBTYPE, &subtype))
+            return false;
+        return IsEqualGUID(subtype, MFVideoFormat_H264);
+    }
+
+  public:
+    /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder#transform-attributes
+    static void configure_acceleration_H264(IMFTransform* transform) {
+        com_ptr<IMFAttributes> attrs{};
+        if (auto hr = transform->GetAttributes(attrs.put()); FAILED(hr))
+            return spdlog::error("{}: {:#08x}", "Failed to get IMFAttributes of the IMFTransform", hr);
+        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE); FAILED(hr))
+            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecVideoAcceleration_H264", hr);
+        if (auto hr = attrs->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE); FAILED(hr))
+            spdlog::error("{}: {:#08x}", "CODECAPI_AVLowLatencyMode", hr);
+        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecNumWorkerThreads, 1); FAILED(hr))
+            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecNumWorkerThreads", hr);
+    }
+};
+
+struct video_transform_test_case : public video_reader_test_case {
+    com_ptr<IMFSourceReaderCallback> reader_callback{};
+
+  public:
+    video_transform_test_case() = default;
+    ~video_transform_test_case() = default;
+
+  public:
+    static HRESULT make_transform_video(IMFTransform** transform, const IID& clsid) noexcept {
+        com_ptr<IUnknown> unknown{};
+        if (auto hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
+            return hr;
+        return unknown->QueryInterface(transform);
+    }
+
+    // @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder#transform-attributes
+    static HRESULT configure_acceleration_H264(IMFTransform* transform) noexcept {
+        com_ptr<IMFAttributes> attrs{};
+        if (auto hr = transform->GetAttributes(attrs.put()); FAILED(hr))
+            return hr;
+        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE); FAILED(hr))
+            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecVideoAcceleration_H264", hr);
+        if (auto hr = attrs->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE); FAILED(hr))
+            spdlog::error("{}: {:#08x}", "CODECAPI_AVLowLatencyMode", hr);
+        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecNumWorkerThreads, 1); FAILED(hr))
+            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecNumWorkerThreads", hr);
+        return S_OK;
     }
 
     static HRESULT make_video_type(IMFMediaType** ptr, const GUID& subtype) noexcept {
@@ -243,19 +446,6 @@ struct video_transform_test_case {
         //REQUIRE(MFGetAttributeRatio(input.get(), MF_MT_FRAME_RATE, &num, &denom) == S_OK);
         //REQUIRE(MFSetAttributeSize(output.get(), MF_MT_FRAME_RATE, num, denom) == S_OK);
         return output;
-    }
-
-    /// @see https://docs.microsoft.com/en-us/windows/win32/api/mfobjects/nn-mfobjects-imfmediabuffer
-    static HRESULT create_single_buffer_sample(IMFSample** output, DWORD bufsz) {
-        if (auto hr = MFCreateSample(output); FAILED(hr))
-            return hr;
-        com_ptr<IMFMediaBuffer> buffer{};
-        if (auto hr = MFCreateMemoryBuffer(bufsz, buffer.put()); FAILED(hr))
-            return hr;
-        // GetMaxLength will be length of the available memory location
-        // GetCurrentLength will be 0
-        IMFSample* sample = *output;
-        return sample->AddBuffer(buffer.get());
     }
 
     /// @todo use GPU buffer
@@ -304,34 +494,6 @@ struct video_transform_test_case {
         }
         // MF_E_TRANSFORM_NEED_MORE_INPUT: not an error condition but it means the allocated output sample is empty.
         return result;
-    }
-
-    static HRESULT consume(com_ptr<IMFSourceReader> source_reader, DWORD istream) {
-        size_t count = 0;
-        bool input_available = true;
-        while (input_available) {
-            DWORD stream_index{};
-            DWORD sample_flags{};
-            LONGLONG sample_timestamp = 0; // unit 100-nanosecond
-            com_ptr<IMFSample> input_sample{};
-            if (auto hr = source_reader->ReadSample(istream, 0, &stream_index, &sample_flags, &sample_timestamp,
-                                                    input_sample.put());
-                FAILED(hr)) {
-                CAPTURE(sample_flags);
-                return hr;
-            }
-            if (sample_flags & MF_SOURCE_READERF_ENDOFSTREAM) {
-                input_available = false;
-                continue;
-            }
-            // probably MF_SOURCE_READERF_STREAMTICK
-            if (input_sample == nullptr)
-                continue;
-            input_sample->SetSampleTime(sample_timestamp);
-            ++count;
-        }
-        spdlog::debug("sample: {}", count);
-        return S_OK;
     }
 
     static void consume(com_ptr<IMFSourceReader> source_reader, com_ptr<IMFTransform> transform, //
@@ -442,26 +604,6 @@ struct video_transform_test_case {
         return props->SetValue(MFPKEY_RESIZE_DST_HEIGHT, val);
     }
 };
-
-TEST_CASE_METHOD(video_transform_test_case, "IMFSourceReader - H264", "[codec]") {
-    GUID subtype{};
-    REQUIRE(source_type->GetGUID(MF_MT_SUBTYPE, &subtype) == S_OK);
-    REQUIRE(IsEqualGUID(subtype, MFVideoFormat_H264));
-
-    constexpr DWORD istream = 0;
-    SECTION("RGB32") {
-        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
-        REQUIRE(consume(reader, istream) == S_OK);
-    }
-    SECTION("NV12") {
-        REQUIRE(set_subtype(MFVideoFormat_NV12) == S_OK);
-        REQUIRE(consume(reader, istream) == S_OK);
-    }
-    SECTION("I420") {
-        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
-        REQUIRE(consume(reader, istream) == S_OK);
-    };
-}
 
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
