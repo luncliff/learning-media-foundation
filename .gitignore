@@ -1,5 +1,9 @@
 CMakeUserPresets.json
 
+windows-classic-samples
+windows-universal-samples
+externals
+
 install
 package-lock.json
 site

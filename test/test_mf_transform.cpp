@@ -56,7 +56,7 @@ struct video_buffer_test_case {
 
   public:
     HRESULT make_texture(ID3D11Texture2D** texture) {
-        D3D11_TEXTURE2D_DESC desc;
+        D3D11_TEXTURE2D_DESC desc{};
         desc.Width = 256;
         desc.Height = 256;
         desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -131,7 +131,7 @@ TEST_CASE_METHOD(video_buffer_test_case, "Uncompressed Video Buffer") {
 void print(IMFMediaType* media_type) noexcept {
     GUID major{};
     media_type->GetGUID(MF_MT_MAJOR_TYPE, &major);
-    spdlog::info("- media_type:");
+    spdlog::info("media_type:");
     spdlog::info("  {}: {}", "major", to_mf_string(major));
 
     if (major == MFMediaType_Audio) {
@@ -149,21 +149,21 @@ void print(IMFMediaType* media_type) noexcept {
         if SUCCEEDED (media_type->GetUINT32(MF_MT_COMPRESSED, &value))
             spdlog::info("  {}: {}", "compressed", static_cast<bool>(value));
         if SUCCEEDED (media_type->GetUINT32(MF_MT_FIXED_SIZE_SAMPLES, &value))
-            spdlog::info("  {}: {}", "fixed_size", static_cast<bool>(value));
+            spdlog::debug("  {}: {}", "fixed_size", static_cast<bool>(value));
         if SUCCEEDED (media_type->GetUINT32(MF_MT_AVG_BITRATE, &value))
-            spdlog::info("  {}: {}", "bitrate", value);
+            spdlog::debug("  {}: {}", "bitrate", value);
         if SUCCEEDED (media_type->GetUINT32(MF_MT_INTERLACE_MODE, &value)) {
             switch (value) {
             case MFVideoInterlace_MixedInterlaceOrProgressive:
-                spdlog::info("  {}: {}", "interlace", "MixedInterlaceOrProgressive");
+                spdlog::debug("  {}: {}", "interlace", "MixedInterlaceOrProgressive");
                 break;
             case MFVideoInterlace_Progressive:
-                spdlog::info("  {}: {}", "interlace", "Progressive");
+                spdlog::debug("  {}: {}", "interlace", "Progressive");
                 break;
             case MFVideoInterlace_Unknown:
                 [[fallthrough]];
             default:
-                spdlog::info("  {}: {}", "interlace", "Unknown");
+                spdlog::debug("  {}: {}", "interlace", "Unknown");
                 break;
             }
         }
@@ -283,7 +283,7 @@ struct video_reader_test_case {
         return S_OK;
     }
 
-    static auto consume(com_ptr<IMFSourceReaderEx> reader, DWORD stream_index)
+    static auto read_samples(com_ptr<IMFSourceReaderEx> reader, DWORD stream_index)
         -> std::experimental::generator<com_ptr<IMFSample>> {
         while (true) {
             DWORD actual_index{};
@@ -305,11 +305,28 @@ struct video_reader_test_case {
         }
     }
 
-    static com_ptr<IMFMediaType> copy_video_type(IMFMediaType* input) noexcept(false) {
+    static com_ptr<IMFMediaType> clone(IMFMediaType* input) noexcept(false) {
         com_ptr<IMFMediaType> output{};
         if (auto hr = MFCreateMediaType(output.put()); FAILED(hr))
             winrt::throw_hresult(hr);
         if (auto hr = input->CopyAllItems(output.get()); FAILED(hr))
+            winrt::throw_hresult(hr);
+        return output;
+    }
+
+    static com_ptr<IMFMediaType> make_video_type(IMFMediaType* input, const GUID& subtype) noexcept {
+        com_ptr<IMFMediaType> output = clone(input);
+        if (auto hr = output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); FAILED(hr))
+            winrt::throw_hresult(hr);
+        if (auto hr = output->SetGUID(MF_MT_SUBTYPE, subtype); FAILED(hr))
+            winrt::throw_hresult(hr);
+        UINT32 w = 0, h = 0;
+        MFGetAttributeSize(input, MF_MT_FRAME_SIZE, &w, &h);
+        if (auto hr = MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, w, h); FAILED(hr))
+            winrt::throw_hresult(hr);
+        UINT32 num = 0, denom = 1;
+        MFGetAttributeRatio(input, MF_MT_FRAME_RATE, &num, &denom);
+        if (auto hr = MFSetAttributeSize(output.get(), MF_MT_FRAME_RATE, num, denom); FAILED(hr))
             winrt::throw_hresult(hr);
         return output;
     }
@@ -349,6 +366,42 @@ TEST_CASE_METHOD(video_reader_test_case, "IMFSourceReader - H264", "[codec]") {
         REQUIRE(consume(reader, istream, num_frame) == S_OK);
     };
 }
+
+struct mf_transform_info_t {
+    DWORD num_input = 0;
+    DWORD num_output = 0;
+    DWORD input_stream_ids[1]{};
+    DWORD output_stream_ids[1]{};
+    MFT_INPUT_STREAM_INFO input_info{};
+    MFT_OUTPUT_STREAM_INFO output_info{};
+
+  public:
+    /// @todo check flags related to sample/buffer constraint
+    explicit mf_transform_info_t(IMFTransform* transform) noexcept(false) {
+        if (auto hr = transform->GetStreamCount(&num_input, &num_output); FAILED(hr))
+            winrt::throw_hresult(hr);
+        switch (auto hr = transform->GetStreamIDs(1, input_stream_ids, 1, output_stream_ids)) {
+        case S_OK:
+        case E_NOTIMPL:
+            break; // some transform might not implement this.
+        default:
+            report_error(hr, "GetStreamIDs");
+        }
+        // CLSID_CColorConvertDMO requires the I/O type configured
+        if (auto hr = transform->GetInputStreamInfo(input_stream_ids[0], &input_info); FAILED(hr))
+            winrt::throw_hresult(hr);
+        if (auto hr = transform->GetOutputStreamInfo(output_stream_ids[0], &output_info); FAILED(hr))
+            winrt::throw_hresult(hr);
+    }
+
+    /// @see MFT_OUTPUT_STREAM_PROVIDES_SAMPLES
+    /// @see MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES
+    bool output_provide_sample() const noexcept {
+        bool flag0 = output_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES;
+        bool flag1 = output_info.dwFlags & MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES;
+        return flag0 || flag1;
+    }
+};
 
 /**
  * @brief `IMFTransform` owner for `MFVideoFormat_H264`
@@ -391,152 +444,227 @@ struct h264_decoder_t {
     }
 };
 
-struct video_transform_test_case : public video_reader_test_case {
-    com_ptr<IMFSourceReaderCallback> reader_callback{};
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
+TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CMSH264DecoderMFT", "[codec]") {
+    h264_decoder_t decoder{CLSID_CMSH264DecoderMFT};
+    REQUIRE(decoder.support(source_type.get()));
 
-  public:
-    video_transform_test_case() = default;
-    ~video_transform_test_case() = default;
+    com_ptr<IMFTransform> transform = decoder.transform;
+    // Valid configuration order can be I->O or O->I.
+    // `CLSID_CMSH264DecoderMFT` uses I->O ordering
+    mf_transform_info_t info{transform.get()};
+    REQUIRE_FALSE(info.output_provide_sample());
 
-  public:
-    static HRESULT make_transform_video(IMFTransform** transform, const IID& clsid) noexcept {
-        com_ptr<IUnknown> unknown{};
-        if (auto hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
-            return hr;
-        return unknown->QueryInterface(transform);
+    com_ptr<IMFSample> output_sample{};
+    REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+    const auto istream = info.input_stream_ids[0];
+    const auto ostream = info.output_stream_ids[0];
+    SECTION("RGB32") {
+        com_ptr<IMFMediaType> input = source_type;
+        REQUIRE(transform->SetInputType(istream, input.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output = make_video_type(input.get(), MFVideoFormat_RGB32);
+        REQUIRE(transform->SetOutputType(ostream, output.get(), 0) == MF_E_INVALIDMEDIATYPE);
+        // we can't consume the samples because there is no transform
     }
 
-    // @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder#transform-attributes
-    static HRESULT configure_acceleration_H264(IMFTransform* transform) noexcept {
-        com_ptr<IMFAttributes> attrs{};
-        if (auto hr = transform->GetAttributes(attrs.put()); FAILED(hr))
-            return hr;
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE); FAILED(hr))
-            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecVideoAcceleration_H264", hr);
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE); FAILED(hr))
-            spdlog::error("{}: {:#08x}", "CODECAPI_AVLowLatencyMode", hr);
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecNumWorkerThreads, 1); FAILED(hr))
-            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecNumWorkerThreads", hr);
-        return S_OK;
-    }
-
-    static HRESULT make_video_type(IMFMediaType** ptr, const GUID& subtype) noexcept {
-        com_ptr<IMFMediaType> type{};
-        if (auto hr = MFCreateMediaType(type.put()); FAILED(hr))
-            return hr;
-        if (auto hr = type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); FAILED(hr))
-            return hr;
-        if (auto hr = type->SetGUID(MF_MT_SUBTYPE, subtype); FAILED(hr))
-            return hr;
-        *ptr = type.get();
-        type->AddRef();
-        return S_OK;
-    }
-
-    static com_ptr<IMFMediaType> make_output_type(com_ptr<IMFMediaType> input, const GUID& subtype) {
-        com_ptr<IMFMediaType> output{};
-        REQUIRE(make_video_type(output.put(), subtype) == S_OK);
-        REQUIRE(input->CopyAllItems(output.get()) == S_OK);
-        //if (IsEqualGUID(subtype, MFVideoFormat_RGB32))
-        //    REQUIRE(output->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Unknown) == S_OK);
-        //UINT32 w = 0, h = 0;
-        //REQUIRE(MFGetAttributeSize(input.get(), MF_MT_FRAME_SIZE, &w, &h) == S_OK);
-        //REQUIRE(MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, w, h) == S_OK);
-        //UINT32 num = 0, denom = 1;
-        //REQUIRE(MFGetAttributeRatio(input.get(), MF_MT_FRAME_RATE, &num, &denom) == S_OK);
-        //REQUIRE(MFSetAttributeSize(output.get(), MF_MT_FRAME_RATE, num, denom) == S_OK);
-        return output;
-    }
-
-    /// @todo use GPU buffer
-    static HRESULT get_transform_output(IMFTransform* transform, DWORD ostream, IMFSample** sample, GUID& subtype,
-                                        BOOL& flushed) {
-        MFT_OUTPUT_STREAM_INFO stream_info{};
-        if (auto hr = transform->GetOutputStreamInfo(ostream, &stream_info); FAILED(hr))
-            return hr;
-
-        flushed = FALSE;
-        *sample = nullptr;
-
-        MFT_OUTPUT_DATA_BUFFER output{};
-        if ((stream_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) == 0) {
-            if (auto hr = create_single_buffer_sample(sample, stream_info.cbSize); FAILED(hr))
-                return hr;
-            output.pSample = *sample;
-        }
+    // for Asynchronous MFT
+    // @todo https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model#get-buffer-requirements
+    // @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model#process-data
+    SECTION("NV12") {
+        com_ptr<IMFMediaType> input = source_type;
+        REQUIRE(transform->SetInputType(istream, input.get(), 0) == S_OK);
+        com_ptr<IMFMediaType> output_type = make_video_type(input.get(), MFVideoFormat_NV12);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
         DWORD status = 0;
-        HRESULT const result = transform->ProcessOutput(0, 1, &output, &status);
-        if (result == S_OK) {
-            *sample = output.pSample;
-            return S_OK;
-        }
+        REQUIRE(transform->GetInputStatus(istream, &status) == S_OK);
+        REQUIRE(status == MFT_INPUT_STATUS_ACCEPT_DATA);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
 
-        /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/handling-stream-changes
-        if (result == MF_E_TRANSFORM_STREAM_CHANGE) {
-            com_ptr<IMFMediaType> changed_output_type{};
-            if (output.dwStatus != MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE) {
-                // todo: add more works for this case
-                return E_NOTIMPL;
-            }
-
-            // query the output type and its subtype
-            if (auto hr = transform->GetOutputAvailableType(ostream, 0, changed_output_type.put()); FAILED(hr))
-                return hr;
-            // check new output media type
-            if (auto hr = changed_output_type->GetGUID(MF_MT_SUBTYPE, &subtype); FAILED(hr))
-                return hr;
-
-            if (auto hr = transform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, NULL); FAILED(hr))
-                return hr;
-            flushed = TRUE;
-            return S_OK;
-        }
-        // MF_E_TRANSFORM_NEED_MORE_INPUT: not an error condition but it means the allocated output sample is empty.
-        return result;
-    }
-
-    static void consume(com_ptr<IMFSourceReader> source_reader, com_ptr<IMFTransform> transform, //
-                        DWORD istream, DWORD ostream) {
-        bool input_available = true;
-        while (input_available) {
-            DWORD stream_index{};
-            DWORD sample_flags{};
-            LONGLONG sample_timestamp = 0; // unit 100-nanosecond
-            com_ptr<IMFSample> input_sample{};
-            if (auto hr = source_reader->ReadSample(istream, 0, &stream_index, &sample_flags, &sample_timestamp,
-                                                    input_sample.put());
-                FAILED(hr)) {
-                CAPTURE(sample_flags);
-                report_error(hr, __func__);
+        size_t output_count = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
                 FAIL(static_cast<uint32_t>(hr));
             }
-            if (sample_flags & MF_SOURCE_READERF_ENDOFSTREAM) {
-                input_available = false;
+
+            MFT_OUTPUT_DATA_BUFFER output{};
+            output.dwStreamID = ostream;
+            output.pSample = output_sample.get();
+            switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+            case S_OK:
+                ++output_count;
                 continue;
-            }
-            // probably MF_SOURCE_READERF_STREAMTICK
-            if (input_sample == nullptr)
+            case MF_E_TRANSFORM_NEED_MORE_INPUT:
                 continue;
-            input_sample->SetSampleTime(sample_timestamp);
-            switch (auto hr = transform->ProcessInput(istream, input_sample.get(), 0)) {
-            case S_OK: // MF_E_TRANSFORM_TYPE_NOT_SET, MF_E_NO_SAMPLE_DURATION, MF_E_NO_SAMPLE_TIMESTAMP
-                break;
-            case MF_E_NOTACCEPTING:
-            case MF_E_UNSUPPORTED_D3D_TYPE:
-            case E_INVALIDARG:
+            case MF_E_TRANSFORM_STREAM_CHANGE:
+                spdlog::debug("stream changed: {:#08x}", status);
+                [[fallthrough]];
             default:
                 report_error(hr, __func__);
                 FAIL(static_cast<uint32_t>(hr));
             }
-            while (true) {
-                BOOL flushed = FALSE;
-                com_ptr<IMFSample> sample{};
-                GUID subtype{};
-                auto hr = get_transform_output(transform.get(), ostream, sample.put(), subtype, flushed);
-                if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
-                    break;
-                if (FAILED(hr)) {
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        REQUIRE(output_count);
+        output_count = 0;
+        bool output_available = true;
+        while (output_available) {
+            MFT_OUTPUT_DATA_BUFFER output{};
+            output.dwStreamID = ostream;
+            output.pSample = output_sample.get();
+            switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+            case S_OK:
+                ++output_count;
+                continue;
+            case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                output_available = false;
+                continue;
+            case MF_E_TRANSFORM_STREAM_CHANGE:
+                spdlog::debug("stream changed: {:#08x}", status);
+                [[fallthrough]];
+            default:
+                report_error(hr, __func__);
+                FAIL(static_cast<uint32_t>(hr));
+            }
+        }
+        REQUIRE(output_count);
+    }
+    SECTION("I420") {
+        com_ptr<IMFMediaType> input = source_type;
+        REQUIRE(transform->SetInputType(istream, input.get(), 0) == S_OK);
+        com_ptr<IMFMediaType> output_type = make_video_type(input.get(), MFVideoFormat_I420);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        DWORD status = 0;
+        REQUIRE(transform->GetInputStatus(istream, &status) == S_OK);
+        REQUIRE(status == MFT_INPUT_STATUS_ACCEPT_DATA);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+
+        size_t output_count = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+
+            MFT_OUTPUT_DATA_BUFFER output{};
+            output.dwStreamID = ostream;
+            output.pSample = output_sample.get();
+            switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+            case S_OK:
+                ++output_count;
+                continue;
+            case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                continue;
+            case MF_E_TRANSFORM_STREAM_CHANGE:
+                spdlog::debug("stream changed: {:#08x}", status);
+                [[fallthrough]];
+            default:
+                report_error(hr, __func__);
+                FAIL(static_cast<uint32_t>(hr));
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        REQUIRE(output_count);
+        output_count = 0;
+        bool output_available = true;
+        while (output_available) {
+            MFT_OUTPUT_DATA_BUFFER output{};
+            output.dwStreamID = ostream;
+            output.pSample = output_sample.get();
+            switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+            case S_OK:
+                ++output_count;
+                continue;
+            case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                output_available = false;
+                continue;
+            case MF_E_TRANSFORM_STREAM_CHANGE:
+                spdlog::debug("stream changed: {:#08x}", status);
+                [[fallthrough]];
+            default:
+                report_error(hr, __func__);
+                FAIL(static_cast<uint32_t>(hr));
+            }
+        }
+        REQUIRE(output_count);
+    }
+    // todo: MFVideoFormat_IYUV
+}
+
+/// @see CLSID_CColorConvertDMO
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/colorconverter
+/// @see Microsoft DirectX Media Object https://docs.microsoft.com/en-us/previous-versions/windows/desktop/api/mediaobj/nn-mediaobj-imediaobject
+struct color_converter_t {
+    com_ptr<IMFTransform> transform{};
+    com_ptr<IPropertyStore> props{};
+    com_ptr<IMediaObject> media_object{};
+
+  public:
+    explicit color_converter_t(const GUID& clsid = CLSID_CColorConvertDMO) noexcept(false) {
+        com_ptr<IUnknown> unknown{};
+        if (auto hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
+            winrt::throw_hresult(hr);
+        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
+            winrt::throw_hresult(hr);
+        winrt::check_hresult(transform->QueryInterface(props.put()));
+        winrt::check_hresult(transform->QueryInterface(media_object.put()));
+    }
+};
+
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
+TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO", "[dsp]") {
+    // Valid configuration order can be I->O or O->I.
+    // `CLSID_CColorConvertDMO` uses I->O ordering
+    // CLSID_CResizerDMO won't have leftover
+    color_converter_t converter{CLSID_CColorConvertDMO};
+    com_ptr<IMFTransform> transform = converter.transform;
+
+    const auto istream = 0;
+    const auto ostream = 0;
+    SECTION("RGB32 - I420") {
+        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_I420);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        size_t output_count = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
                     report_error(hr, __func__);
                     FAIL(static_cast<uint32_t>(hr));
                 }
@@ -544,34 +672,205 @@ struct video_transform_test_case : public video_reader_test_case {
         }
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
-        // fetch remaining output in the transform
-        while (true) {
-            BOOL flushed = FALSE;
-            com_ptr<IMFSample> sample{};
-            GUID subtype{};
-            HRESULT hr = get_transform_output(transform.get(), ostream, sample.put(), subtype, flushed);
-            if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
-                break;
-            if (FAILED(hr)) {
-                report_error(hr, __func__);
+        REQUIRE(output_count);
+    }
+    SECTION("RGB32 - IYUV") {
+        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_IYUV);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        size_t output_count = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
                 FAIL(static_cast<uint32_t>(hr));
             }
-            // processed output
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
         }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        REQUIRE(output_count);
+    }
+    SECTION("NV12 - RGB32") {
+        // @todo Try with Texture2D buffer
+        REQUIRE(set_subtype(MFVideoFormat_NV12) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        size_t output_count = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        REQUIRE(output_count);
+    }
+    SECTION("I420 - RGB32") {
+        // @todo Try with Texture2D buffer
+        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        size_t output_count = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        REQUIRE(output_count);
+    }
+    SECTION("I420 - RGB565") {
+        // @todo Try with Texture2D buffer
+        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB565);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        size_t output_count = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        REQUIRE(output_count);
+    }
+}
+
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/videoresizer
+struct sample_resizer_t {
+    com_ptr<IMFTransform> transform{};
+    com_ptr<IWMResizerProps> props{};
+
+  public:
+    sample_resizer_t() {
+        com_ptr<IUnknown> unknown{};
+        if (auto hr = CoCreateInstance(CLSID_CResizerDMO, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
+            winrt::throw_hresult(hr);
+        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
+            winrt::throw_hresult(hr);
+        winrt::check_hresult(transform->QueryInterface(props.put()));
     }
 
-    static HRESULT configure_rectangle(IMFVideoProcessorControl* control, IMFMediaType* media_type) noexcept {
-        UINT32 w = 0, h = 0;
-        if (auto hr = MFGetAttributeSize(media_type, MF_MT_FRAME_SIZE, &w, &h); FAILED(hr))
-            return hr;
-        RECT rect{};
-        rect.right = w; // LTRB rectangle
-        rect.bottom = h;
-        if (auto hr = control->SetSourceRectangle(&rect); FAILED(hr))
-            return hr;
-        return control->SetDestinationRectangle(&rect);
-    }
-
+  public:
     /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/videoresizer
     static HRESULT configure_source_rectangle(IPropertyStore* props, const RECT& rect) noexcept {
         PROPVARIANT val{};
@@ -605,278 +904,293 @@ struct video_transform_test_case : public video_reader_test_case {
     }
 };
 
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
-TEST_CASE_METHOD(video_transform_test_case, "MFTransform - CLSID_CMSH264DecoderMFT", "[codec]") {
-    REQUIRE(set_subtype(MFVideoFormat_H264) == S_OK);
-
-    com_ptr<IMFTransform> transform{};
-    REQUIRE(make_transform_video(transform.put(), CLSID_CMSH264DecoderMFT) == S_OK);
-    REQUIRE(configure_acceleration_H264(transform.get()) == S_OK);
-
-    // Valid configuration order can be I->O or O->I.
-    // `CLSID_CMSH264DecoderMFT` uses I->O ordering
-    DWORD num_input = 0;
-    DWORD num_output = 0;
-    REQUIRE(transform->GetStreamCount(&num_input, &num_output) == S_OK);
-    const DWORD istream = num_input - 1;
-    const DWORD ostream = num_output - 1;
-
-    SECTION("RGB32") {
-        com_ptr<IMFMediaType> input = source_type;
-        REQUIRE(transform->SetInputType(istream, input.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output{};
-        REQUIRE(MFCreateMediaType(output.put()) == S_OK);
-        REQUIRE(input->CopyAllItems(output.get()) == S_OK);
-        REQUIRE(output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32) == S_OK);
-        REQUIRE(transform->SetOutputType(ostream, output.get(), 0) == MF_E_INVALIDMEDIATYPE);
-        // we can't consume the samples because there is no transform
-    }
-    SECTION("NV12") {
-        com_ptr<IMFMediaType> input = source_type;
-        REQUIRE(transform->SetInputType(istream, input.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output{};
-        REQUIRE(MFCreateMediaType(output.put()) == S_OK);
-        REQUIRE(input->CopyAllItems(output.get()) == S_OK);
-        REQUIRE(output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12) == S_OK);
-        REQUIRE(transform->SetOutputType(ostream, output.get(), 0) == S_OK);
-
-        DWORD status = 0;
-        REQUIRE(transform->GetInputStatus(istream, &status) == S_OK);
-        REQUIRE(status == MFT_INPUT_STATUS_ACCEPT_DATA);
-        // for Asynchronous MFT
-        // @todo https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model#get-buffer-requirements
-        // @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model#process-data
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        consume(reader, transform, istream, ostream);
-    }
-    SECTION("IYUV") {
-        com_ptr<IMFMediaType> input = source_type;
-        REQUIRE(transform->SetInputType(istream, input.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output{};
-        REQUIRE(MFCreateMediaType(output.put()) == S_OK);
-        REQUIRE(input->CopyAllItems(output.get()) == S_OK);
-        REQUIRE(output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_IYUV) == S_OK);
-        REQUIRE(transform->SetOutputType(ostream, output.get(), 0) == S_OK);
-
-        DWORD status = 0;
-        REQUIRE(transform->GetInputStatus(istream, &status) == S_OK);
-        REQUIRE(status == MFT_INPUT_STATUS_ACCEPT_DATA);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        consume(reader, transform, istream, ostream);
-    }
-    SECTION("I420") {
-        com_ptr<IMFMediaType> input = source_type;
-        REQUIRE(transform->SetInputType(istream, input.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output{};
-        REQUIRE(MFCreateMediaType(output.put()) == S_OK);
-        REQUIRE(input->CopyAllItems(output.get()) == S_OK);
-        REQUIRE(output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_I420) == S_OK);
-        REQUIRE(transform->SetOutputType(ostream, output.get(), 0) == S_OK);
-
-        DWORD status = 0;
-        REQUIRE(transform->GetInputStatus(istream, &status) == S_OK);
-        REQUIRE(status == MFT_INPUT_STATUS_ACCEPT_DATA);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        consume(reader, transform, istream, ostream);
-    }
-}
-
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/colorconverter
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
-TEST_CASE_METHOD(video_transform_test_case, "MFTransform - CLSID_CColorConvertDMO", "[dsp]") {
-    com_ptr<IMFTransform> transform{};
-    REQUIRE(make_transform_video(transform.put(), CLSID_CColorConvertDMO) == S_OK);
-    com_ptr<IPropertyStore> props{};
-    {
-        REQUIRE(transform->QueryInterface(props.put()) == S_OK);
-        PROPVARIANT var{};
-        REQUIRE(SUCCEEDED(props->GetValue(MFPKEY_COLORCONV_MODE, &var)));
-        // spdlog::debug("- MFPKEY_COLORCONV_MODE: {}", var.intVal == 0 ? "Progressive" : "Interlaced");
-        // Microsoft DirectX Media Object https://docs.microsoft.com/en-us/previous-versions/windows/desktop/api/mediaobj/nn-mediaobj-imediaobject
-        com_ptr<IMediaObject> media_object{};
-        REQUIRE(transform->QueryInterface(media_object.put()) == S_OK);
-    }
-
-    com_ptr<IMFSourceReaderEx> source_reader = reader;
-    DWORD istream = 0;
-    DWORD ostream = 0;
-    SECTION("RGB32 - I420") {
-        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
-        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_I420);
-        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
-
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        // CLSID_CResizerDMO won't have leftover
-        consume(source_reader, transform, istream, ostream);
-    }
-    SECTION("RGB32 - IYUV") {
-        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
-        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_IYUV);
-        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
-
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        // CLSID_CResizerDMO won't have leftover
-        consume(source_reader, transform, istream, ostream);
-    }
-    SECTION("NV12 - RGB32") {
-        REQUIRE(set_subtype(MFVideoFormat_NV12) == S_OK);
-        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_RGB32);
-        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
-
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        // CLSID_CResizerDMO won't have leftover
-        consume(source_reader, transform, istream, ostream);
-    }
-    SECTION("I420 - RGB32") {
-        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
-        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_RGB32);
-        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
-
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        // CLSID_CResizerDMO won't have leftover
-        consume(source_reader, transform, istream, ostream);
-    }
-    SECTION("I420 - RGB565") {
-        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
-        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_RGB565);
-        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
-
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        // CLSID_CResizerDMO won't have leftover
-        consume(source_reader, transform, istream, ostream);
-    }
-}
-
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/videoresizer
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
-TEST_CASE_METHOD(video_transform_test_case, "MFTransform - Video Resizer DSP", "[dsp]") {
-    com_ptr<IMFTransform> transform{};
-    REQUIRE(make_transform_video(transform.put(), CLSID_CResizerDMO) == S_OK);
-    com_ptr<IWMResizerProps> resizer{};
-    REQUIRE(transform->QueryInterface(resizer.put()) == S_OK);
+TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Resizer DSP", "[dsp]") {
+    sample_resizer_t resizer{};
+    com_ptr<IMFTransform> transform = resizer.transform;
+    com_ptr<IWMResizerProps> props = resizer.props;
 
     DWORD num_input = 0;
     DWORD num_output = 0;
     REQUIRE(transform->GetStreamCount(&num_input, &num_output) == S_OK);
-    const DWORD istream = num_input - 1;
-    const DWORD ostream = num_output - 1;
+    REQUIRE(num_input == 1);
+    REQUIRE(num_output == 1);
 
-    SECTION("RGB32") {
-        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
-        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_RGB32);
-        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
-
-        UINT32 width = 0, height = 0;
-        MFGetAttributeSize(source_type.get(), MF_MT_FRAME_SIZE, &width, &height);
-        CAPTURE(width, height);
-        REQUIRE(resizer->SetClipRegion(0, 0, 640, 480) == S_OK);
-        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, 640, 480) == S_OK);
-
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        // CLSID_CResizerDMO won't have leftover
-        consume(reader, transform, istream, ostream);
-    }
-    SECTION("I420") {
-        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
-        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_I420);
-        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
-
-        UINT32 width = 0, height = 0;
-        MFGetAttributeSize(source_type.get(), MF_MT_FRAME_SIZE, &width, &height);
-        CAPTURE(width, height);
-        REQUIRE(resizer->SetClipRegion(0, 0, 640, 480) == S_OK);
-        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, 640, 480) == S_OK);
-
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
-        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
-        // CLSID_CResizerDMO won't have leftover
-        consume(reader, transform, istream, ostream);
-    }
+    const auto istream = num_input - 1;
+    const auto ostream = num_input - 1;
     SECTION("NV12") {
         REQUIRE(set_subtype(MFVideoFormat_NV12) == S_OK);
         REQUIRE(transform->SetInputType(istream, source_type.get(), 0) != S_OK);
     }
+
+    //UINT32 width = 0, height = 0;
+    //MFGetAttributeSize(source_type.get(), MF_MT_FRAME_SIZE, &width, &height);
+    SECTION("RGB32") {
+        REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
+        REQUIRE(props->SetClipRegion(0, 0, 640, 480) == S_OK);
+        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, 640, 480) == S_OK);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        size_t input_count = 0;
+        size_t output_count = 0;
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            ++input_count;
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        REQUIRE(output_count);
+        REQUIRE(input_count == output_count);
+    }
+    SECTION("I420") {
+        REQUIRE(set_subtype(MFVideoFormat_I420) == S_OK);
+        REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
+
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_I420);
+        REQUIRE(props->SetClipRegion(0, 0, 640, 480) == S_OK);
+        REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, 640, 480) == S_OK);
+        REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
+
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        size_t input_count = 0;
+        size_t output_count = 0;
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            ++input_count;
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
+        // CLSID_CResizerDMO won't have leftover
+        REQUIRE(output_count);
+        REQUIRE(input_count == output_count);
+    }
 }
+
+/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/media-foundation-work-queue-and-threading-improvements
+struct sample_processor_t {
+    com_ptr<IMFTransform> transform{};
+    com_ptr<IMFVideoProcessorControl> control{};
+    com_ptr<IMFRealTimeClientEx> realtime{};
+
+  public:
+    sample_processor_t() {
+        com_ptr<IUnknown> unknown{};
+        if (auto hr = CoCreateInstance(CLSID_VideoProcessorMFT, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put()));
+            FAILED(hr))
+            winrt::throw_hresult(hr);
+        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
+            winrt::throw_hresult(hr);
+        winrt::check_hresult(transform->QueryInterface(control.put()));
+        winrt::check_hresult(transform->QueryInterface(realtime.put()));
+    }
+
+  public:
+    HRESULT configure_rectangle(IMFMediaType* media_type) noexcept {
+        if (media_type == nullptr)
+            return E_POINTER;
+        return configure_rectangle(control.get(), media_type);
+    }
+
+  public:
+    static HRESULT configure_rectangle(IMFVideoProcessorControl* control, IMFMediaType* media_type) noexcept {
+        UINT32 w = 0, h = 0;
+        if (auto hr = MFGetAttributeSize(media_type, MF_MT_FRAME_SIZE, &w, &h); FAILED(hr))
+            return hr;
+        RECT rect{}; // LTRB rectangle
+        rect.right = w;
+        rect.bottom = h;
+        if (auto hr = control->SetSourceRectangle(&rect); FAILED(hr))
+            return hr;
+        return control->SetDestinationRectangle(&rect);
+    }
+};
 
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/video-processor-mft#remarks
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
-TEST_CASE_METHOD(video_transform_test_case, "MFTransform - Video Processor MFT", "[dsp]") {
+TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Processor MFT", "[dsp]") {
     REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
 
-    com_ptr<IMFTransform> transform{};
-    REQUIRE(make_transform_video(transform.put(), CLSID_VideoProcessorMFT) == S_OK);
+    sample_processor_t processor{};
+    com_ptr<IMFTransform> transform = processor.transform;
 
     DWORD num_input = 0;
     DWORD num_output = 0;
     REQUIRE(transform->GetStreamCount(&num_input, &num_output) == S_OK);
+
     const DWORD istream = num_input - 1;
     const DWORD ostream = num_output - 1;
-
-    // https://docs.microsoft.com/en-us/windows/win32/medfound/media-foundation-work-queue-and-threading-improvements
-    com_ptr<IMFRealTimeClientEx> realtime{};
-    REQUIRE(transform->QueryInterface(realtime.put()) == S_OK);
-
-    com_ptr<IMFVideoProcessorControl> control{};
-    REQUIRE(transform->QueryInterface(control.put()) == S_OK);
-
     SECTION("MIRROR_HORIZONTAL/ROTAION_NORMAL") {
         REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_RGB32);
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
         REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
-        REQUIRE(configure_rectangle(control.get(), source_type.get()) == S_OK);
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        REQUIRE(processor.configure_rectangle(source_type.get()) == S_OK);
+
         // H mirror, corrects the orientation, letterboxes the output as needed
+        com_ptr<IMFVideoProcessorControl> control = processor.control;
         REQUIRE(control->SetMirror(MF_VIDEO_PROCESSOR_MIRROR::MIRROR_HORIZONTAL) == S_OK);
         REQUIRE(control->SetRotation(MF_VIDEO_PROCESSOR_ROTATION::ROTATION_NORMAL) == S_OK);
         MFARGB color{};
         REQUIRE(control->SetBorderColor(&color) == S_OK);
 
+        size_t input_count = 0;
+        size_t output_count = 0;
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            ++input_count;
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
         // CLSID_VideoProcessorMFT won't have leftover
-        consume(reader, transform, istream, ostream);
+        REQUIRE(output_count);
+        REQUIRE(input_count == output_count);
     }
     SECTION("MIRROR_VERTICAL/ROTAION_NORMAL") {
         REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
-        com_ptr<IMFMediaType> output_type = make_output_type(source_type, MFVideoFormat_RGB32);
+        com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
         REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
-        REQUIRE(configure_rectangle(control.get(), source_type.get()) == S_OK);
+        mf_transform_info_t info{transform.get()};
+        REQUIRE_FALSE(info.output_provide_sample());
+        com_ptr<IMFSample> output_sample{};
+        REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
+
+        REQUIRE(processor.configure_rectangle(source_type.get()) == S_OK);
         // H mirror, corrects the orientation, letterboxes the output as needed
+        com_ptr<IMFVideoProcessorControl> control = processor.control;
         REQUIRE(control->SetMirror(MF_VIDEO_PROCESSOR_MIRROR::MIRROR_VERTICAL) == S_OK);
         REQUIRE(control->SetRotation(MF_VIDEO_PROCESSOR_ROTATION::ROTATION_NORMAL) == S_OK);
         MFARGB color{};
         REQUIRE(control->SetBorderColor(&color) == S_OK);
 
+        size_t input_count = 0;
+        size_t output_count = 0;
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, NULL) == S_OK);
         REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, NULL) == S_OK);
+        DWORD status = 0;
+        for (com_ptr<IMFSample> sample : read_samples(reader, reader_stream)) {
+            ++input_count;
+            if (auto hr = transform->ProcessInput(istream, sample.get(), 0); FAILED(hr)) {
+                report_error(hr, "ProcessInput");
+                FAIL(static_cast<uint32_t>(hr));
+            }
+            bool output_available = true;
+            while (output_available) {
+                MFT_OUTPUT_DATA_BUFFER output{};
+                output.dwStreamID = ostream;
+                output.pSample = output_sample.get();
+                switch (auto hr = transform->ProcessOutput(0, 1, &output, &status); hr) {
+                case S_OK:
+                    ++output_count;
+                    continue;
+                case MF_E_TRANSFORM_NEED_MORE_INPUT:
+                    output_available = false;
+                    continue;
+                case MF_E_TRANSFORM_STREAM_CHANGE:
+                    [[fallthrough]];
+                default:
+                    report_error(hr, __func__);
+                    FAIL(static_cast<uint32_t>(hr));
+                }
+            }
+        }
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, NULL) == S_OK);
+        REQUIRE(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, NULL) == S_OK);
         // CLSID_VideoProcessorMFT won't have leftover
-        consume(reader, transform, istream, ostream);
+        REQUIRE(output_count);
+        REQUIRE(input_count == output_count);
     }
 }
