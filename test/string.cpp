@@ -23,7 +23,7 @@ std::wstring mb2w(std::string_view in) noexcept(false) {
     const char* ptr = in.data();
     const char* const end = in.data() + in.length();
     mbstate_t state{};
-    wchar_t wc;
+    wchar_t wc{};
     while (size_t len = mbrtowc(&wc, ptr, end - ptr, &state)) {
         if (len == static_cast<size_t>(-1)) // bad encoding
             throw std::system_error{errno, std::system_category(), "mbrtowc"};
