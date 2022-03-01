@@ -172,7 +172,7 @@ void print(IMFMediaType* media_type) noexcept {
         if SUCCEEDED (MFGetAttributeRatio(media_type, MF_MT_FRAME_RATE, &num, &denom))
             spdlog::info("  {}: {:.1f}", "fps", static_cast<float>(num) / denom);
         if SUCCEEDED (MFGetAttributeRatio(media_type, MF_MT_PIXEL_ASPECT_RATIO, &num, &denom))
-            spdlog::info("  {}: {}", "aspect_ratio", static_cast<float>(num) / denom);
+            spdlog::info("  {}: {:.3f}", "aspect_ratio", static_cast<float>(num) / denom);
 
         UINT32 w = 0, h = 0;
         if SUCCEEDED (MFGetAttributeSize(media_type, MF_MT_FRAME_SIZE, &w, &h)) {
