@@ -32,6 +32,7 @@ struct mf_transform_info_t final {
  */
 struct h264_decoder_t final {
     winrt::com_ptr<IMFTransform> transform{};
+    winrt::com_ptr<IMFRealTimeClient> realtime{};
 
   public:
     explicit h264_decoder_t(const GUID& clsid) noexcept(false);
@@ -51,6 +52,7 @@ struct color_converter_t final {
     winrt::com_ptr<IMFTransform> transform{};
     winrt::com_ptr<IPropertyStore> props{};
     winrt::com_ptr<IMediaObject> media_object{};
+    winrt::com_ptr<IMFRealTimeClient> realtime{};
 
   public:
     explicit color_converter_t(const GUID& clsid) noexcept(false);
@@ -61,6 +63,7 @@ struct color_converter_t final {
 struct sample_cropper_t final {
     winrt::com_ptr<IMFTransform> transform{};
     winrt::com_ptr<IWMResizerProps> props0{};
+    winrt::com_ptr<IMFRealTimeClient> realtime{};
 
   public:
     sample_cropper_t() noexcept(false);

@@ -51,6 +51,7 @@ h264_decoder_t::h264_decoder_t(const GUID& clsid) noexcept(false) {
     if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
         winrt::throw_hresult(hr);
     configure_acceleration(transform.get());
+    winrt::check_hresult(unknown->QueryInterface(realtime.put()));
 }
 
 h264_decoder_t::h264_decoder_t() noexcept(false) : h264_decoder_t{CLSID_CMSH264DecoderMFT} {
@@ -83,6 +84,7 @@ color_converter_t::color_converter_t(const GUID& clsid) noexcept(false) {
         winrt::throw_hresult(hr);
     winrt::check_hresult(transform->QueryInterface(props.put()));
     winrt::check_hresult(transform->QueryInterface(media_object.put()));
+    winrt::check_hresult(unknown->QueryInterface(realtime.put()));
 }
 
 color_converter_t::color_converter_t() noexcept(false) : color_converter_t{CLSID_CColorConvertDMO} {
@@ -95,6 +97,7 @@ sample_cropper_t::sample_cropper_t() noexcept(false) {
     if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
         winrt::throw_hresult(hr);
     winrt::check_hresult(transform->QueryInterface(props0.put()));
+    winrt::check_hresult(unknown->QueryInterface(realtime.put()));
 }
 
 HRESULT sample_cropper_t::crop(IMFMediaType* type, const RECT& region) noexcept {
