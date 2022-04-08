@@ -66,7 +66,7 @@ struct sample_cropper_t final {
     sample_cropper_t() noexcept(false);
 
     [[nodiscard]] HRESULT crop(IMFMediaType* type, const RECT& region) noexcept;
-    [[nodiscard]] HRESULT get_crop_region(RECT& src, RECT& dst) noexcept(false);
+    [[nodiscard]] HRESULT get_crop_region(RECT& src, RECT& dst) const noexcept;
 };
 
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/media-foundation-work-queue-and-threading-improvements
@@ -81,6 +81,7 @@ struct sample_processor_t {
     [[nodiscard]] HRESULT set_type(IMFMediaType* input, IMFMediaType* output) noexcept;
     [[nodiscard]] HRESULT set_scale(IMFMediaType* input, uint32_t width, uint32_t height) noexcept;
     [[nodiscard]] HRESULT set_size(const RECT& rect) noexcept;
+    [[nodiscard]] HRESULT set_color(const MFARGB& color) noexcept;
     [[nodiscard]] HRESULT set_mirror_rotation(MF_VIDEO_PROCESSOR_MIRROR mirror,
                                               MF_VIDEO_PROCESSOR_ROTATION rotation) noexcept;
 };

@@ -118,7 +118,7 @@ HRESULT sample_cropper_t::crop(IMFMediaType* type, const RECT& region) noexcept 
     }
 }
 
-HRESULT sample_cropper_t::get_crop_region(RECT& src, RECT& dst) noexcept(false) {
+HRESULT sample_cropper_t::get_crop_region(RECT& src, RECT& dst) const noexcept {
     return props0->GetFullCropRegion(&src.left, &src.top, &src.right, &src.bottom, //
                                      &dst.left, &dst.top, &dst.right, &dst.bottom);
 }
@@ -146,6 +146,11 @@ HRESULT sample_processor_t::set_size(const RECT& rect) noexcept {
     if (auto hr = control->SetSourceRectangle(ptr); FAILED(hr))
         return hr;
     return control->SetDestinationRectangle(ptr);
+}
+
+HRESULT sample_processor_t::set_color(const MFARGB& color) noexcept {
+    MFARGB copied = color;
+    return control->SetBorderColor(&copied);
 }
 
 HRESULT sample_processor_t::set_scale(IMFMediaType* input, uint32_t width, uint32_t height) noexcept {
