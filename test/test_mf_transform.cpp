@@ -1,26 +1,19 @@
 #include <catch2/catch.hpp>
 
-// clang-format OFF
-#include <Windows.h>
+// clang-format off
+#include <winrt/Windows.Foundation.h>
 #include <d3d11_4.h>
 #include <d3d9.h>
 #include <evr.h>
-#include <mfapi.h>
-#include <mferror.h>
-#include <mfidl.h>
 #include <mfreadwrite.h>
 #include <windowsx.h>
 
-#include <codecapi.h>
-#include <dxva2api.h>
-#include <mediaobj.h>
-#include <mmdeviceapi.h>
-#include <wmcodecdsp.h>
 // clang-format on
 #include <experimental/generator>
 #include <filesystem>
 #include <spdlog/spdlog.h>
-#include <winrt/Windows.Foundation.h>
+
+#include "mf_transform.hpp"
 
 namespace fs = std::filesystem;
 
@@ -314,16 +307,6 @@ struct video_reader_test_case {
         return output;
     }
 
-    static HRESULT get_frame_size(IMFMediaType* type, RECT& rect) noexcept {
-        UINT32 w = 0, h = 0;
-        if (auto hr = MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &w, &h); FAILED(hr))
-            return hr;
-        rect.left = rect.top = 0;
-        rect.right = w;
-        rect.bottom = h;
-        return S_OK;
-    }
-
     static com_ptr<IMFMediaType> make_video_type(IMFMediaType* input, const GUID& subtype) noexcept {
         com_ptr<IMFMediaType> output = clone(input);
         if (auto hr = output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); FAILED(hr))
@@ -377,94 +360,17 @@ TEST_CASE_METHOD(video_reader_test_case, "IMFSourceReader - H264", "[codec]") {
     };
 }
 
-struct mf_transform_info_t final {
-    DWORD num_input = 0;
-    DWORD num_output = 0;
-    DWORD input_stream_ids[1]{};
-    DWORD output_stream_ids[1]{};
-    MFT_INPUT_STREAM_INFO input_info{};
-    MFT_OUTPUT_STREAM_INFO output_info{};
-
-  public:
-    mf_transform_info_t() noexcept = default;
-    /// @todo check flags related to sample/buffer constraint
-    explicit mf_transform_info_t(IMFTransform* transform) noexcept(false) {
-        if (auto hr = transform->GetStreamCount(&num_input, &num_output); FAILED(hr))
-            winrt::throw_hresult(hr);
-        switch (auto hr = transform->GetStreamIDs(1, input_stream_ids, 1, output_stream_ids)) {
-        case S_OK:
-        case E_NOTIMPL:
-            break; // some transform might not implement this.
-        default:
-            report_error(hr, "GetStreamIDs");
-        }
-        // CLSID_CColorConvertDMO requires the I/O type configured
-        if (auto hr = transform->GetInputStreamInfo(input_stream_ids[0], &input_info); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = transform->GetOutputStreamInfo(output_stream_ids[0], &output_info); FAILED(hr))
-            winrt::throw_hresult(hr);
-    }
-
-    /// @see MFT_OUTPUT_STREAM_PROVIDES_SAMPLES
-    /// @see MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES
-    bool output_provide_sample() const noexcept {
-        bool flag0 = output_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES;
-        bool flag1 = output_info.dwFlags & MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES;
-        return flag0 || flag1;
-    }
-};
-
-/**
- * @brief `IMFTransform` owner for `MFVideoFormat_H264`
- * @todo Support `MFVideoFormat_H264_ES`, `MFVideoFormat_H264_HDCP`
- * @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
- * @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
- */
-struct h264_decoder_t final {
-    com_ptr<IMFTransform> transform{};
-
-  public:
-    explicit h264_decoder_t(const GUID& clsid = CLSID_CMSH264DecoderMFT) noexcept(false) {
-        com_ptr<IUnknown> unknown{};
-        if (auto hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        configure_acceleration_H264(transform.get());
-    }
-
-    bool support(IMFMediaType* source_type) const noexcept {
-        GUID subtype{};
-        if FAILED (source_type->GetGUID(MF_MT_SUBTYPE, &subtype))
-            return false;
-        return IsEqualGUID(subtype, MFVideoFormat_H264);
-    }
-
-  public:
-    /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder#transform-attributes
-    static void configure_acceleration_H264(IMFTransform* transform) {
-        com_ptr<IMFAttributes> attrs{};
-        if (auto hr = transform->GetAttributes(attrs.put()); FAILED(hr))
-            return spdlog::error("{}: {:#08x}", "Failed to get IMFAttributes of the IMFTransform", hr);
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE); FAILED(hr))
-            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecVideoAcceleration_H264", hr);
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVLowLatencyMode, TRUE); FAILED(hr))
-            spdlog::error("{}: {:#08x}", "CODECAPI_AVLowLatencyMode", hr);
-        if (auto hr = attrs->SetUINT32(CODECAPI_AVDecNumWorkerThreads, 1); FAILED(hr))
-            spdlog::error("{}: {:#08x}", "CODECAPI_AVDecNumWorkerThreads", hr);
-    }
-};
-
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/h-264-video-decoder
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
 TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CMSH264DecoderMFT", "[codec]") {
-    h264_decoder_t decoder{CLSID_CMSH264DecoderMFT};
+    h264_decoder_t decoder{};
     REQUIRE(decoder.support(source_type.get()));
 
     com_ptr<IMFTransform> transform = decoder.transform;
     // Valid configuration order can be I->O or O->I.
     // `CLSID_CMSH264DecoderMFT` uses I->O ordering
-    mf_transform_info_t info{transform.get()};
+    mf_transform_info_t info{};
+    REQUIRE_NOTHROW(info.from(transform.get()));
     REQUIRE_FALSE(info.output_provide_sample());
 
     com_ptr<IMFSample> output_sample{};
@@ -563,32 +469,12 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CMSH264DecoderMFT"
     // todo: MFVideoFormat_IYUV
 }
 
-/// @see CLSID_CColorConvertDMO
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/colorconverter
-/// @see Microsoft DirectX Media Object https://docs.microsoft.com/en-us/previous-versions/windows/desktop/api/mediaobj/nn-mediaobj-imediaobject
-struct color_converter_t final {
-    com_ptr<IMFTransform> transform{};
-    com_ptr<IPropertyStore> props{};
-    com_ptr<IMediaObject> media_object{};
-
-  public:
-    explicit color_converter_t(const GUID& clsid = CLSID_CColorConvertDMO) noexcept(false) {
-        com_ptr<IUnknown> unknown{};
-        if (auto hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        winrt::check_hresult(transform->QueryInterface(props.put()));
-        winrt::check_hresult(transform->QueryInterface(media_object.put()));
-    }
-};
-
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
 TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO", "[dsp]") {
     // Valid configuration order can be I->O or O->I.
     // `CLSID_CColorConvertDMO` uses I->O ordering
     // CLSID_CResizerDMO won't have leftover
-    color_converter_t converter{CLSID_CColorConvertDMO};
+    color_converter_t converter{};
     com_ptr<IMFTransform> transform = converter.transform;
 
     const DWORD istream = 0;
@@ -630,13 +516,14 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO",
         REQUIRE(output_count);
     };
 
+    mf_transform_info_t info{};
     SECTION("RGB32 - I420") {
         REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
         REQUIRE(transform->SetInputType(istream, source_type.get(), 0) == S_OK);
         com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_I420);
         REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -648,7 +535,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO",
         com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_IYUV);
         REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -661,7 +548,8 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO",
         com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
         REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
-        mf_transform_info_t info{transform.get()};
+        mf_transform_info_t info{};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -674,7 +562,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO",
         com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
         REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -687,7 +575,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO",
         com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB565);
         REQUIRE(transform->SetOutputType(ostream, output_type.get(), 0) == S_OK);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -695,64 +583,10 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - CLSID_CColorConvertDMO",
     }
 }
 
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/videoresizer
-struct sample_cropper_t final {
-    com_ptr<IMFTransform> transform{};
-    com_ptr<IWMResizerProps> props0{}; // for crop
-
-  public:
-    sample_cropper_t() noexcept(false) {
-        com_ptr<IUnknown> unknown{};
-        if (auto hr = CoCreateInstance(CLSID_CResizerDMO, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put())); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        winrt::check_hresult(transform->QueryInterface(props0.put()));
-    }
-
-    [[nodiscard]] HRESULT crop(IMFMediaType* type, const RECT& region) noexcept {
-        constexpr auto istream = 0, ostream = 0;
-        try {
-            if (auto hr = transform->SetInputType(istream, type, 0); FAILED(hr))
-                return hr;
-            uint32_t w = region.right - region.left;
-            uint32_t h = region.bottom - region.top;
-            if (auto hr = props0->SetClipRegion(region.left, region.top, w, h); FAILED(hr))
-                return hr;
-            GUID subtype{};
-            if (auto hr = type->GetGUID(MF_MT_SUBTYPE, &subtype); FAILED(hr))
-                return hr;
-            com_ptr<IMFMediaType> output = make_video_type(subtype);
-            MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, w, h);
-            return transform->SetOutputType(ostream, output.get(), 0);
-        } catch (const winrt::hresult_error& err) {
-            return err.code();
-        }
-    }
-
-    HRESULT get_crop_region(RECT& src, RECT& dst) noexcept(false) {
-        return props0->GetFullCropRegion(&src.left, &src.top, &src.right, &src.bottom, //
-                                         &dst.left, &dst.top, &dst.right, &dst.bottom);
-    }
-
-  private:
-    static com_ptr<IMFMediaType> make_video_type(const GUID& subtype) noexcept(false) {
-        com_ptr<IMFMediaType> output{};
-        if (auto hr = MFCreateMediaType(output.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = output->SetGUID(MF_MT_SUBTYPE, subtype); FAILED(hr))
-            winrt::throw_hresult(hr);
-        return output;
-    }
-};
-
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
 TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Resizer DSP", "[dsp]") {
     sample_cropper_t resizer{};
     com_ptr<IMFTransform> transform = resizer.transform;
-    com_ptr<IWMResizerProps> props = resizer.props0;
 
     SECTION("stream count") {
         DWORD num_input = 0;
@@ -810,6 +644,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Resizer DSP", "[ds
         REQUIRE(input_count == output_count);
     };
 
+    mf_transform_info_t info{};
     SECTION("RGB32") {
         REQUIRE(set_subtype(MFVideoFormat_RGB32) == S_OK);
         RECT src{0, 0, 640, 480}, dst{};
@@ -818,7 +653,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Resizer DSP", "[ds
         REQUIRE(dst.right == 640);
         REQUIRE(dst.bottom == 480);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -832,84 +667,13 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Resizer DSP", "[ds
         REQUIRE(dst.right == 640);
         REQUIRE(dst.bottom == 480);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
         consume_samples(reader, reader_stream, transform, output_sample);
     }
 }
-
-/// @see https://docs.microsoft.com/en-us/windows/win32/medfound/media-foundation-work-queue-and-threading-improvements
-struct sample_processor_t {
-    com_ptr<IMFTransform> transform{};
-    com_ptr<IMFVideoProcessorControl> control{};
-    com_ptr<IMFRealTimeClientEx> realtime{};
-
-  public:
-    sample_processor_t() noexcept(false) {
-        com_ptr<IUnknown> unknown{};
-        if (auto hr = CoCreateInstance(CLSID_VideoProcessorMFT, nullptr, CLSCTX_ALL, IID_PPV_ARGS(unknown.put()));
-            FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = unknown->QueryInterface(transform.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        winrt::check_hresult(transform->QueryInterface(control.put()));
-        winrt::check_hresult(transform->QueryInterface(realtime.put()));
-    }
-
-  public:
-    HRESULT set_type(IMFMediaType* input, IMFMediaType* output) noexcept {
-        constexpr auto istream = 0, ostream = 0;
-        if (auto hr = transform->SetInputType(istream, input, 0); FAILED(hr))
-            return hr;
-        return transform->SetOutputType(ostream, output, 0);
-    }
-
-    HRESULT set_size(const RECT& rect) noexcept {
-        RECT* ptr = const_cast<RECT*>(&rect);
-        if (auto hr = control->SetSourceRectangle(ptr); FAILED(hr))
-            return hr;
-        return control->SetDestinationRectangle(ptr);
-    }
-
-    HRESULT set_scale(IMFMediaType* input, uint32_t width, uint32_t height) noexcept {
-        constexpr auto istream = 0, ostream = 0;
-        if (auto hr = transform->SetInputType(istream, input, 0); FAILED(hr))
-            return hr;
-        RECT region{0, 0, width, height};
-        if (auto hr = control->SetDestinationRectangle(&region); FAILED(hr))
-            return hr;
-        try {
-            GUID subtype{};
-            if (auto hr = input->GetGUID(MF_MT_SUBTYPE, &subtype); FAILED(hr))
-                return hr;
-            com_ptr<IMFMediaType> output = make_video_type(subtype);
-            MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, width, height);
-            return transform->SetOutputType(ostream, output.get(), 0);
-        } catch (const winrt::hresult_error& err) {
-            return err.code();
-        }
-    }
-
-    HRESULT set_mirror_rotation(MF_VIDEO_PROCESSOR_MIRROR mirror, MF_VIDEO_PROCESSOR_ROTATION rotation) noexcept {
-        if (auto hr = control->SetMirror(MF_VIDEO_PROCESSOR_MIRROR::MIRROR_VERTICAL); FAILED(hr))
-            return hr;
-        return control->SetRotation(MF_VIDEO_PROCESSOR_ROTATION::ROTATION_NORMAL);
-    }
-
-  private:
-    static com_ptr<IMFMediaType> make_video_type(const GUID& subtype) noexcept(false) {
-        com_ptr<IMFMediaType> output{};
-        if (auto hr = MFCreateMediaType(output.put()); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); FAILED(hr))
-            winrt::throw_hresult(hr);
-        if (auto hr = output->SetGUID(MF_MT_SUBTYPE, subtype); FAILED(hr))
-            winrt::throw_hresult(hr);
-        return output;
-    }
-};
 
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/video-processor-mft#remarks
 /// @see https://docs.microsoft.com/en-us/windows/win32/medfound/basic-mft-processing-model
@@ -974,11 +738,12 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Processor MFT", "[
         REQUIRE(input_count == output_count);
     };
 
+    mf_transform_info_t info{};
     SECTION("MIRROR_HORIZONTAL/ROTAION_NORMAL") {
         com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
         REQUIRE(processor.set_type(source_type.get(), output_type.get()) == S_OK);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -993,7 +758,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Processor MFT", "[
         com_ptr<IMFMediaType> output_type = make_video_type(source_type.get(), MFVideoFormat_RGB32);
         REQUIRE(processor.set_type(source_type.get(), output_type.get()) == S_OK);
 
-        mf_transform_info_t info{transform.get()};
+        REQUIRE_NOTHROW(info.from(transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         com_ptr<IMFSample> output_sample{};
         REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -1010,7 +775,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Processor MFT", "[
             REQUIRE(MFSetAttributeSize(output_type.get(), MF_MT_FRAME_SIZE, 720, 720) == S_OK);
             REQUIRE(processor.set_type(source_type.get(), output_type.get()) == S_OK);
 
-            mf_transform_info_t info{processor.transform.get()};
+            REQUIRE_NOTHROW(info.from(transform.get()));
             REQUIRE_FALSE(info.output_provide_sample());
             com_ptr<IMFSample> output_sample{};
             REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -1019,7 +784,7 @@ TEST_CASE_METHOD(video_reader_test_case, "MFTransform - Video Processor MFT", "[
         SECTION("With Width/Height") {
             REQUIRE(processor.set_scale(source_type.get(), 720, 720) == S_OK);
 
-            mf_transform_info_t info{processor.transform.get()};
+            REQUIRE_NOTHROW(info.from(transform.get()));
             REQUIRE_FALSE(info.output_provide_sample());
             com_ptr<IMFSample> output_sample{};
             REQUIRE(create_single_buffer_sample(output_sample.put(), info.output_info.cbSize) == S_OK);
@@ -1091,7 +856,8 @@ TEST_CASE_METHOD(rgba32_buffer_test_case, "Resize to ID3D11Texture2D(RGBA32)", "
         sample_cropper_t cropper{};
         REQUIRE(cropper.crop(source_type.get(), dst) == S_OK);
 
-        mf_transform_info_t info{cropper.transform.get()};
+        mf_transform_info_t info{};
+        REQUIRE_NOTHROW(info.from(cropper.transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         REQUIRE(info.output_info.cbSize == static_cast<uint32_t>(dst.right * dst.bottom * 4));
 
@@ -1101,7 +867,8 @@ TEST_CASE_METHOD(rgba32_buffer_test_case, "Resize to ID3D11Texture2D(RGBA32)", "
         sample_processor_t resizer{};
         REQUIRE(resizer.set_scale(source_type.get(), dst.right, dst.bottom) == S_OK);
 
-        mf_transform_info_t info{resizer.transform.get()};
+        mf_transform_info_t info{};
+        REQUIRE_NOTHROW(info.from(resizer.transform.get()));
         REQUIRE_FALSE(info.output_provide_sample());
         REQUIRE(info.output_info.cbSize == static_cast<uint32_t>(dst.right * dst.bottom * 4));
 
