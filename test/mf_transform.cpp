@@ -52,6 +52,7 @@ h264_decoder_t::h264_decoder_t(const GUID& clsid) noexcept(false) {
         winrt::throw_hresult(hr);
     configure_acceleration(transform.get());
     winrt::check_hresult(unknown->QueryInterface(realtime.put()));
+    winrt::check_hresult(realtime->SetWorkQueue(MFASYNC_CALLBACK_QUEUE_STANDARD));
 }
 
 h264_decoder_t::h264_decoder_t() noexcept(false) : h264_decoder_t{CLSID_CMSH264DecoderMFT} {
@@ -85,6 +86,7 @@ color_converter_t::color_converter_t(const GUID& clsid) noexcept(false) {
     winrt::check_hresult(transform->QueryInterface(props.put()));
     winrt::check_hresult(transform->QueryInterface(media_object.put()));
     winrt::check_hresult(unknown->QueryInterface(realtime.put()));
+    winrt::check_hresult(realtime->SetWorkQueue(MFASYNC_CALLBACK_QUEUE_STANDARD));
 }
 
 color_converter_t::color_converter_t() noexcept(false) : color_converter_t{CLSID_CColorConvertDMO} {
@@ -98,6 +100,7 @@ sample_cropper_t::sample_cropper_t() noexcept(false) {
         winrt::throw_hresult(hr);
     winrt::check_hresult(transform->QueryInterface(props0.put()));
     winrt::check_hresult(unknown->QueryInterface(realtime.put()));
+    winrt::check_hresult(realtime->SetWorkQueue(MFASYNC_CALLBACK_QUEUE_STANDARD));
 }
 
 HRESULT sample_cropper_t::crop(IMFMediaType* type, const RECT& region) noexcept {
@@ -116,7 +119,7 @@ HRESULT sample_cropper_t::crop(IMFMediaType* type, const RECT& region) noexcept 
         MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, w, h);
         return transform->SetOutputType(ostream, output.get(), 0);
     } catch (const winrt::hresult_error& err) {
-        spdlog::error("{}: {:#08x} {}", __func__, err.code(), winrt::to_string(err.message()));
+        spdlog::error("{}: {:#08x} {}", __func__, static_cast<uint32_t>(err.code()), winrt::to_string(err.message()));
         return err.code();
     }
 }
@@ -135,6 +138,7 @@ sample_processor_t::sample_processor_t() noexcept(false) {
         winrt::throw_hresult(hr);
     winrt::check_hresult(transform->QueryInterface(control.put()));
     winrt::check_hresult(transform->QueryInterface(realtime.put()));
+    winrt::check_hresult(realtime->SetWorkQueueEx(MFASYNC_CALLBACK_QUEUE_STANDARD, -1));
 }
 
 HRESULT sample_processor_t::set_type(IMFMediaType* input, IMFMediaType* output) noexcept {
@@ -171,7 +175,7 @@ HRESULT sample_processor_t::set_scale(IMFMediaType* input, uint32_t width, uint3
         MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, width, height);
         return transform->SetOutputType(ostream, output.get(), 0);
     } catch (const winrt::hresult_error& err) {
-        spdlog::error("{}: {:#08x} {}", __func__, err.code(), winrt::to_string(err.message()));
+        spdlog::error("{}: {:#08x} {}", __func__, static_cast<uint32_t>(err.code()), winrt::to_string(err.message()));
         return err.code();
     }
 }
