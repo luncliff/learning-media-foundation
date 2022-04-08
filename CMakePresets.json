@@ -11,6 +11,7 @@
             "displayName": "vcpkg(x64-windows) debug",
             "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build-x64-windows",
+            "installDir": "${sourceDir}/install",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
                 "BUILD_SHARED_LIBS": "ON",
@@ -21,8 +22,7 @@
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
             }
         },
         {
@@ -30,6 +30,7 @@
             "displayName": "vcpkg(x64-windows) release",
             "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build-x64-windows",
+            "installDir": "${sourceDir}/install",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
                 "BUILD_SHARED_LIBS": "ON",
@@ -40,8 +41,7 @@
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
             },
             "environment": {
                 "EXPERIMENTAL": "true"
@@ -52,6 +52,7 @@
             "displayName": "vcpkg(x86-windows) debug",
             "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/build-x86-windows",
+            "installDir": "${sourceDir}/install",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
                 "BUILD_SHARED_LIBS": "ON",
@@ -62,8 +63,7 @@
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
                 "VCPKG_TARGET_TRIPLET": "x86-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
             },
             "debug": {
                 "output": true
