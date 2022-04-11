@@ -45,6 +45,12 @@ message(STATUS "Using commit: ${GIT_COMMIT_ID}")
 string(TIMESTAMP BUILD_TIMESTAMP UTC) # %Y-%m-%dT%H:%M:%SZ
 message(STATUS "Using timestamp: ${BUILD_TIMESTAMP}")
 
+list(APPEND BUILD_COMPILE_DEFINITIONS
+    SOURCE_VERSION="${PROJECT_VERSION}"
+    SOURCE_COMMIT_ID="${GIT_COMMIT_ID}"
+    SOURCE_TIMESTAMP="${BUILD_TIMESTAMP}"
+)
+
 find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(directx-headers CONFIG REQUIRED)
@@ -59,7 +65,7 @@ target_cppwinrt(media_test_api_codegen
 )
 
 add_library(media_test_api SHARED
-    # test/WinRTComponent.def
+    test/WinRTComponent.def
     # test/MessageHolder.idl
     test/WinRTComponent.MessageHolder.h
     test/WinRTComponent.MessageHolder.cpp
@@ -85,6 +91,11 @@ target_compile_definitions(media_test_api
 PRIVATE
     WIN32_LEAN_AND_MEAN
     _WINRT_DLL _WINDLL
+)
+
+set_source_files_properties(test/dllmain.cpp
+PROPERTIES
+    COMPILE_DEFINITIONS "${BUILD_COMPILE_DEFINITIONS}"
 )
 
 target_compile_options(media_test_api
@@ -142,12 +153,6 @@ PRIVATE
 target_link_options(media_test_suite
 PRIVATE
     /ERRORREPORT:SEND
-)
-
-list(APPEND BUILD_COMPILE_DEFINITIONS
-    SOURCE_VERSION="${PROJECT_VERSION}"
-    SOURCE_COMMIT_ID="${GIT_COMMIT_ID}"
-    SOURCE_TIMESTAMP="${BUILD_TIMESTAMP}"
 )
 
 set_source_files_properties(test/test_main.cpp
