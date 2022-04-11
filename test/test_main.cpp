@@ -2,21 +2,23 @@
 #include <catch2/catch.hpp>
 #include <catch2/catch_reporter_sonarqube.hpp>
 
+#include <DispatcherQueue.h>
 #include <experimental/coroutine>
 #include <filesystem>
+#include <gsl/gsl>
 #include <mfapi.h>
-// https://docs.microsoft.com/en-us/windows/win32/sysinfo/getting-the-system-version
-#include <DispatcherQueue.h>
-#include <VersionHelpers.h>
 #include <pplawait.h>
 #include <ppltasks.h>
+#include <spdlog/sinks/stdout_sinks.h>
+#include <spdlog/spdlog.h>
 #include <winrt/Windows.Foundation.h> // namespace winrt::Windows::Foundation
 #include <winrt/Windows.System.h>     // namespace winrt::Windows::System
 #include <winrt/base.h>
 
-#include <gsl/gsl>
-#include <spdlog/sinks/stdout_sinks.h>
-#include <spdlog/spdlog.h>
+// https://docs.microsoft.com/en-us/windows/win32/sysinfo/getting-the-system-version
+#include <VersionHelpers.h>
+
+#include "winrt/WinRTComponent.h"
 
 namespace fs = std::filesystem;
 
@@ -41,14 +43,14 @@ bool has_env(const char* key) noexcept {
 auto make_logger(const char* name, FILE* fout) noexcept(false) {
     using mutex_t = spdlog::details::console_nullmutex;
     using sink_t = spdlog::sinks::stdout_sink_base<mutex_t>;
-    return std::make_unique<spdlog::logger>(name, std::make_shared<sink_t>(fout));
+    return std::make_shared<spdlog::logger>(name, std::make_shared<sink_t>(fout));
 }
 
 class test_suite_context_t final {
   public:
     test_suite_context_t() {
-        winrt::init_apartment();
-        winrt::check_hresult(MFStartup(MF_VERSION));
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        winrt::check_hresult(MFStartup(MF_VERSION, MFSTARTUP_FULL));
     }
     ~test_suite_context_t() {
         MFShutdown();
@@ -62,12 +64,21 @@ class test_suite_context_t final {
         for (wchar_t** ptr = envp; (*ptr) != nullptr; ++ptr)
             spdlog::debug(" - {}", winrt::to_string(std::wstring_view{*ptr}));
     }
+
+    void test_activation_factory() noexcept {
+        try {
+            winrt::WinRTComponent::MessageHolder holder{};
+            spdlog::error("{}", winrt::to_string(holder.Message()));
+        } catch (const winrt::hresult_error& ex) {
+            spdlog::error("{}", winrt::to_string(ex.message()));
+        }
+    }
 };
 
 test_suite_context_t context{};
 
 int wmain(int argc, wchar_t* argv[], wchar_t* envp[]) {
-    std::shared_ptr<spdlog::logger> logger = make_logger("test", stdout);
+    auto logger = make_logger("test", stdout);
     logger->set_pattern("%T.%e [%L] %8t %v");
     logger->set_level(spdlog::level::level_enum::debug);
     spdlog::set_default_logger(logger);

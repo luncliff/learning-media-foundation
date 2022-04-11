@@ -1,0 +1,11 @@
+// see https://docs.microsoft.com/en-us/uwp/midl-3/intro
+import "Windows.Foundation.idl";
+
+namespace WinRTComponent
+{
+    runtimeclass MessageHolder
+    {
+        MessageHolder();
+        String Message;
+    }
+}
