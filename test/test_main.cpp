@@ -18,7 +18,7 @@
 // https://docs.microsoft.com/en-us/windows/win32/sysinfo/getting-the-system-version
 #include <VersionHelpers.h>
 
-#include "WinRTComponent.MessageHolder.h"
+#include "winrt/WinRTComponent.h"
 
 namespace fs = std::filesystem;
 

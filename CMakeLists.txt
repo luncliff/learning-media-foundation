@@ -57,12 +57,44 @@ target_cppwinrt(media_test_api_codegen
     codegen "${sdk_folder}" "${sdk_version}"
     codegen "" true ""
 )
-add_library(media_test_api INTERFACE)
+
+add_library(media_test_api SHARED
+    # test/WinRTComponent.def
+    # test/MessageHolder.idl
+    test/WinRTComponent.MessageHolder.h
+    test/WinRTComponent.MessageHolder.cpp
+)
+add_dependencies(media_test_api media_test_api_codegen)
+
+set_target_properties(media_test_api
+PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS true
+)
+
 target_include_directories(media_test_api
-INTERFACE
-    ${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen
-    ${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen/comp_generated
-    ${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen/comp_generated/WinRTComponent
+PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen/comp_generated>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen/comp_generated/WinRTComponent>
+PRIVATE
+    test
+)
+
+target_compile_definitions(media_test_api
+PRIVATE
+    WIN32_LEAN_AND_MEAN
+    _WINRT_DLL _WINDLL
+)
+
+target_compile_options(media_test_api
+PRIVATE
+    /std:c++17 /Zc:__cplusplus /await
+    /W4 /bigobj
+)
+
+target_link_libraries(media_test_api
+PRIVATE
+    windowsapp # C++/WinRT
 )
 
 add_executable(media_test_suite
@@ -73,17 +105,11 @@ add_executable(media_test_suite
     test/test_mf_transform.cpp
     test/test_mf_threading.cpp
     test/string.cpp
-
-    test/WinRTComponent.def
-    # test/MessageHolder.idl
-    test/WinRTComponent.MessageHolder.h
-    test/WinRTComponent.MessageHolder.cpp
 )
 
 target_compile_definitions(media_test_suite
 PRIVATE
     WIN32_LEAN_AND_MEAN
-    _WINRT_DLL _WINDLL
 )
 
 target_link_libraries(media_test_suite
