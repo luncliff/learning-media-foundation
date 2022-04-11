@@ -63,6 +63,7 @@ add_library(media_test_api SHARED
     # test/MessageHolder.idl
     test/WinRTComponent.MessageHolder.h
     test/WinRTComponent.MessageHolder.cpp
+    test/dllmain.cpp
 )
 add_dependencies(media_test_api media_test_api_codegen)
 
@@ -73,10 +74,10 @@ PROPERTIES
 
 target_include_directories(media_test_api
 PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen/comp_generated>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen/comp_generated/WinRTComponent>
 PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen
+    ${CMAKE_CURRENT_BINARY_DIR}/media_test_api_codegen/comp_generated/WinRTComponent
     test
 )
 
