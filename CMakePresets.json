@@ -16,6 +16,8 @@
                 "BUILD_SHARED_LIBS": "ON",
                 "CMAKE_BUILD_TYPE": "Debug",
                 "CMAKE_GENERATOR_PLATFORM": "x64",
+                "CMAKE_SYSTEM_VERSION": "10.0.22000.0",
+                "CMAKE_INSTALL_DEBUG_LIBRARIES": "ON",
                 "CMAKE_INSTALL_PREFIX": {
                     "type": "PATH",
                     "value": "${sourceDir}/install"
@@ -24,8 +26,7 @@
                     "type": "FILEPATH",
                     "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
                 },
-                "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+                "VCPKG_TARGET_TRIPLET": "x64-windows"
             }
         },
         {
@@ -33,6 +34,7 @@
             "displayName": "vcpkg(x64-windows) release",
             "inherits": "x64-windows-debug",
             "cacheVariables": {
+                "CMAKE_INSTALL_DEBUG_LIBRARIES": "OFF",
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "VCPKG_TARGET_TRIPLET": "x64-windows"
             },
