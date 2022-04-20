@@ -1,0 +1,69 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "x64-windows-debug",
+            "displayName": "vcpkg(x64-windows) debug",
+            "generator": "Visual Studio 16 2019",
+            "binaryDir": "${sourceDir}/build-x64-windows",
+            "cacheVariables": {
+                "BUILD_TESTING": "ON",
+                "BUILD_SHARED_LIBS": "ON",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_GENERATOR_PLATFORM": "x64",
+                "CMAKE_INSTALL_PREFIX": {
+                    "type": "PATH",
+                    "value": "${sourceDir}/install"
+                },
+                "CMAKE_TOOLCHAIN_FILE": {
+                    "type": "FILEPATH",
+                    "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+                },
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+            }
+        },
+        {
+            "name": "x64-windows-release",
+            "displayName": "vcpkg(x64-windows) release",
+            "inherits": "x64-windows-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "VCPKG_TARGET_TRIPLET": "x64-windows"
+            },
+            "environment": {
+                "EXPERIMENTAL": "true"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "x64-windows-debug",
+            "configuration": "Debug",
+            "configurePreset": "x64-windows-debug"
+        },
+        {
+            "name": "x64-windows-release",
+            "configuration": "RelWithDebInfo",
+            "configurePreset": "x64-windows-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "x64-windows-debug",
+            "configurePreset": "x64-windows-debug",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            }
+        }
+    ]
+}
