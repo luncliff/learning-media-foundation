@@ -10,17 +10,19 @@
             "name": "x64-windows-debug",
             "displayName": "vcpkg(x64-windows) debug",
             "generator": "Visual Studio 17 2022",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
             "binaryDir": "${sourceDir}/build-x64-windows",
             "installDir": "${sourceDir}/install",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
                 "BUILD_TESTING": "ON",
                 "BUILD_SHARED_LIBS": "ON",
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_VS_PLATFORM_NAME_DEFAULT": "x64",
-                "CMAKE_TOOLCHAIN_FILE": {
-                    "type": "FILEPATH",
-                    "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-                },
+                "CMAKE_GENERATOR_PLATFORM": "x64",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
                 "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
             }
@@ -28,20 +30,10 @@
         {
             "name": "x64-windows-release",
             "displayName": "vcpkg(x64-windows) release",
-            "generator": "Visual Studio 17 2022",
-            "binaryDir": "${sourceDir}/build-x64-windows",
-            "installDir": "${sourceDir}/install",
+            "inherits": "x64-windows-debug",
             "cacheVariables": {
-                "BUILD_TESTING": "ON",
-                "BUILD_SHARED_LIBS": "ON",
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "CMAKE_VS_PLATFORM_NAME_DEFAULT": "x64",
-                "CMAKE_TOOLCHAIN_FILE": {
-                    "type": "FILEPATH",
-                    "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-                },
-                "VCPKG_TARGET_TRIPLET": "x64-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+                "CMAKE_GENERATOR_PLATFORM": "x64"
             },
             "environment": {
                 "EXPERIMENTAL": "true"
@@ -50,20 +42,14 @@
         {
             "name": "x86-windows-debug",
             "displayName": "vcpkg(x86-windows) debug",
-            "generator": "Visual Studio 17 2022",
+            "inherits": "x64-windows-debug",
+            "architecture": {
+                "value": "Win32"
+            },
             "binaryDir": "${sourceDir}/build-x86-windows",
-            "installDir": "${sourceDir}/install",
             "cacheVariables": {
-                "BUILD_TESTING": "ON",
-                "BUILD_SHARED_LIBS": "ON",
-                "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_VS_PLATFORM_NAME_DEFAULT": "Win32",
-                "CMAKE_TOOLCHAIN_FILE": {
-                    "type": "FILEPATH",
-                    "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-                },
-                "VCPKG_TARGET_TRIPLET": "x86-windows",
-                "CMAKE_SYSTEM_VERSION": "10.0.19041.0"
+                "CMAKE_GENERATOR_PLATFORM": "Win32",
+                "VCPKG_TARGET_TRIPLET": "x86-windows"
             },
             "debug": {
                 "output": true
