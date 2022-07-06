@@ -111,7 +111,7 @@ set(CPACK_GENERATOR "ZIP")
 include(CPack)
 
 find_package(glfw3 CONFIG REQUIRED)
-find_package(Catch2 CONFIG REQUIRED)
+find_package(Catch2 3.0 CONFIG REQUIRED)
 include(Catch)
 
 target_include_directories(media_test_suite

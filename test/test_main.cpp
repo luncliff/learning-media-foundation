@@ -1,20 +1,18 @@
+// https://docs.microsoft.com/en-us/windows/win32/sysinfo/getting-the-system-version
 #define CATCH_CONFIG_RUNNER
-#include <catch2/catch.hpp>
-#include <catch2/catch_reporter_sonarqube.hpp>
+#include <catch2/catch_all.hpp>
 
+#include <DispatcherQueue.h>
+#include <VersionHelpers.h>
 #include <experimental/coroutine>
 #include <filesystem>
 #include <mfapi.h>
-// https://docs.microsoft.com/en-us/windows/win32/sysinfo/getting-the-system-version
-#include <DispatcherQueue.h>
-#include <VersionHelpers.h>
 #include <pplawait.h>
 #include <ppltasks.h>
 #include <winrt/Windows.Foundation.h> // namespace winrt::Windows::Foundation
 #include <winrt/Windows.System.h>     // namespace winrt::Windows::System
 #include <winrt/base.h>
 
-#include <gsl/gsl>
 #include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -66,13 +64,13 @@ class test_suite_context_t final {
 
 test_suite_context_t context{};
 
-int wmain(int argc, wchar_t* argv[], wchar_t* envp[]) {
+int wmain(int argc, char* argv[]) {
     std::shared_ptr<spdlog::logger> logger = make_logger("test", stdout);
     logger->set_pattern("%T.%e [%L] %8t %v");
     logger->set_level(spdlog::level::level_enum::debug);
     spdlog::set_default_logger(logger);
 
-    context.use_environment(envp);
+    // context.use_environment(envp);
 
     spdlog::info("C++/WinRT:");
     spdlog::info("  version: {:s}", CPPWINRT_VERSION); // WINRT_version
@@ -128,15 +126,15 @@ TEST_CASE_METHOD(winrt_test_case, "DispatcherQueue::ShutdownQueueAsync", "[winrt
 
 /// @see https://gist.github.com/kennykerr/6490e1494449927147dc18616a5e601e
 /// @todo use CreateOnDedicatedThread
-TEST_CASE_METHOD(winrt_test_case, "DispatcherQueue::TryEnqueue", "[WinRT]") {
-    DispatcherQueueController controller = winrt::Windows::System::DispatcherQueueController::CreateOnDedicatedThread();
-    auto on_return = gsl::finally([controller]() {
-        IAsyncAction operation = controller.ShutdownQueueAsync();
-        operation.get();
-    });
-    DispatcherQueue queue = controller.DispatcherQueue();
-    REQUIRE(queue);
-    DWORD current = GetCurrentThreadId();
-    DWORD dedicated = query_thread_id(queue).get();
-    REQUIRE(current != dedicated);
-}
+// TEST_CASE_METHOD(winrt_test_case, "DispatcherQueue::TryEnqueue", "[WinRT]") {
+//     DispatcherQueueController controller = winrt::Windows::System::DispatcherQueueController::CreateOnDedicatedThread();
+//     auto on_return = gsl::finally([controller]() {
+//         IAsyncAction operation = controller.ShutdownQueueAsync();
+//         operation.get();
+//     });
+//     DispatcherQueue queue = controller.DispatcherQueue();
+//     REQUIRE(queue);
+//     DWORD current = GetCurrentThreadId();
+//     DWORD dedicated = query_thread_id(queue).get();
+//     REQUIRE(current != dedicated);
+// }
