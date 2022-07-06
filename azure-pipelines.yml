@@ -45,7 +45,7 @@ jobs:
       #   displayName: "Download: test MP4 files"
       - task: Cache@2
         inputs:
-          key: "2022-02 | vcpkg | $(build.platform)"
+          key: "2022-06 | vcpkg | $(build.platform)"
           path: $(vcpkg.default.binary.cache)
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
@@ -88,11 +88,11 @@ jobs:
     steps:
       - task: Cache@2
         inputs:
-          key: "2022-02 | vcpkg | x64"
+          key: "2022-06 | vcpkg | x64"
           path: $(vcpkg.default.binary.cache)
       - task: Cache@2
         inputs:
-          key: "2022-02 | sonarqube"
+          key: "2022-06 | sonarqube"
           path: $(Pipeline.Workspace)/.sonarqube
       - task: run-vcpkg@0
         displayName: "Install: Vcpkg"
